@@ -1,0 +1,171 @@
+﻿<mxfile host="app.diagrams.net" modified="2026-03-01T14:45:00.000Z" agent="Codex GPT-5" version="24.7.17">
+  <diagram id="task-lifecycle" name="Task Lifecycle">
+    <mxGraphModel dx="1800" dy="980" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3600" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="2" value="创建任务&#xa;POST /tasks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="3" value="RECEIVED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="250" y="40" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="4" value="QUEUED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="40" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="5" value="VALIDATING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="610" y="40" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="6" value="PLANNING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="790" y="40" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="7" value="RUNNING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="970" y="40" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="8" value="WAITING_TOOL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="40" width="150" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="9" value="requires_hitl?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="35" width="150" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="10" value="WAITING_HUMAN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1530" y="40" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="11" value="审批决策" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1730" y="35" width="130" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="12" value="REVIEWING" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="40" width="140" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="13" value="SUCCEEDED&#xa;(终态)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2080" y="10" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="14" value="FAILED_RETRYABLE" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2080" y="100" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="15" value="FAILED_FINAL&#xa;(终态)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2080" y="190" width="170" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="16" value="TIMED_OUT&#xa;(终态)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1900" y="200" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="17" value="CANCELLED&#xa;(终态)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="320" width="170" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="18" value="重试触发&#xa;POST /tasks/{id}/rerun" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1860" y="100" width="190" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="19" value="取消入口（统一）&#xa;POST /tasks/{id}/cancel&#xa;适用所有非终态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="320" width="250" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="20" value="终态集合：SUCCEEDED / FAILED_FINAL / TIMED_OUT / CANCELLED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2280" y="10" width="360" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="100" edge="1" parent="1" source="2" target="3" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="101" edge="1" parent="1" source="3" target="4" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="102" value="worker set_status" edge="1" parent="1" source="4" target="5" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="103" edge="1" parent="1" source="5" target="6" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="104" edge="1" parent="1" source="6" target="7" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="105" edge="1" parent="1" source="7" target="8" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="106" edge="1" parent="1" source="8" target="9" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="107" value="true" edge="1" parent="1" source="9" target="10" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="108" value="false" edge="1" parent="1" source="9" target="12" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="109" value="等待人工" edge="1" parent="1" source="10" target="11" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="110" value="APPROVED/EDITED" edge="1" parent="1" source="11" target="12" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="111" value="REJECTED" edge="1" parent="1" source="11" target="15" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="112" value="TTL 超时" edge="1" parent="1" source="10" target="16" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="113" value="成功" edge="1" parent="1" source="12" target="13" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="114" value="可重试错误" edge="1" parent="1" source="12" target="14" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="115" value="不可重试错误" edge="1" parent="1" source="12" target="15" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="116" value="workflow_start_failed" edge="1" parent="1" source="4" target="14" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="117" value="可重试错误" edge="1" parent="1" source="5" target="14" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="118" value="可重试错误" edge="1" parent="1" source="6" target="14" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="119" value="可重试错误" edge="1" parent="1" source="7" target="14" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="120" value="可重试错误" edge="1" parent="1" source="8" target="14" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="121" value="不可重试错误" edge="1" parent="1" source="5" target="15" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="122" value="不可重试错误" edge="1" parent="1" source="6" target="15" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="123" value="不可重试错误" edge="1" parent="1" source="7" target="15" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="124" value="不可重试错误" edge="1" parent="1" source="8" target="15" style="endArrow=block;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="125" edge="1" parent="1" source="14" target="18" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="126" value="新建 run 回到排队" edge="1" parent="1" source="18" target="4" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="127" edge="1" parent="1" source="19" target="17" style="endArrow=block;html=1;rounded=0;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="128" value="示例" edge="1" parent="1" source="4" target="19" style="endArrow=none;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="129" value="示例" edge="1" parent="1" source="7" target="19" style="endArrow=none;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="130" value="示例" edge="1" parent="1" source="10" target="19" style="endArrow=none;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="131" value="示例" edge="1" parent="1" source="14" target="19" style="endArrow=none;html=1;rounded=0;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

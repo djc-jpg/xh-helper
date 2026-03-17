@@ -1,0 +1,131 @@
+groups:
+  - name: xh-platform-alerts
+    rules:
+      - alert: ApiP95LatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="api"}[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency is above 2 seconds"
+          description: "p95 latency exceeded 2s for 5 minutes."
+
+      - alert: TaskSuccessRateLow
+        expr: (sum(rate(task_success_total[15m])) / clamp_min(sum(rate(task_total[15m])), 1)) < 0.9
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Task success rate dropped below 90%"
+          description: "Task success rate over 15m is below threshold."
+
+      - alert: TaskCostSpike
+        expr: max_over_time(task_cost_usd[5m]) > max_over_time(task_budget_usd[5m]) * 1.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Task cost exceeded budget threshold"
+          description: "Single task cost exceeds budget * 1.2."
+
+      - alert: MasAgentSuccessRateLow
+        expr: |
+          (
+            1 - (
+              sum by (agent_id) (rate(mas_agent_execution_total{outcome="failed"}[15m]))
+              /
+              clamp_min(sum by (agent_id) (rate(mas_agent_execution_total[15m])), 0.001)
+            )
+          ) < 0.95
+          and
+          sum by (agent_id) (increase(mas_agent_execution_total[15m])) >= 20
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MAS agent success rate dropped below 95%"
+          description: "Agent {{ $labels.agent_id }} success rate is below 95% for 10 minutes."
+
+      - alert: MasAgentFailureTypeSpike
+        expr: sum by (agent_id, failure_type) (increase(mas_agent_retries_total[10m])) >= 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MAS failure type spike detected"
+          description: "Agent {{ $labels.agent_id }} failure_type={{ $labels.failure_type }} retried >=10 times in 10m."
+
+      - alert: MasQueueBacklogHigh
+        expr: max_over_time(mas_message_queue_backlog[10m]) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MAS queue backlog is high"
+          description: "Queue backlog high for receiver={{ $labels.receiver }} backend={{ $labels.backend }}."
+
+      - alert: MasQueueBacklogCritical
+        expr: max_over_time(mas_message_queue_backlog[10m]) > 250
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MAS queue backlog is critical"
+          description: "Queue backlog is >250 for receiver={{ $labels.receiver }} backend={{ $labels.backend }}."
+
+      - alert: MasRateLimitHitRateHigh
+        expr: |
+          (
+            sum(rate(mas_agent_decisions_total{agent_id="execution_agent", decision="THROTTLE"}[10m]))
+            /
+            clamp_min(sum(rate(mas_agent_decisions_total{agent_id="execution_agent"}[10m])), 0.001)
+          ) > 0.10
+          and
+          sum(increase(mas_agent_decisions_total{agent_id="execution_agent"}[10m])) >= 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Execution agent rate-limit hit ratio is high"
+          description: "THROTTLE decision ratio exceeded 10% in the last 10m."
+
+      - alert: MasRateLimitHitRateCritical
+        expr: |
+          (
+            sum(rate(mas_agent_decisions_total{agent_id="execution_agent", decision="THROTTLE"}[10m]))
+            /
+            clamp_min(sum(rate(mas_agent_decisions_total{agent_id="execution_agent"}[10m])), 0.001)
+          ) > 0.30
+          and
+          sum(increase(mas_agent_decisions_total{agent_id="execution_agent"}[10m])) >= 30
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Execution agent rate-limit hit ratio is critical"
+          description: "THROTTLE decision ratio exceeded 30% in the last 10m."
+
+      - alert: MasRetryRateHigh
+        expr: |
+          (
+            sum(rate(mas_agent_retries_total[15m]))
+            /
+            clamp_min(sum(rate(mas_agent_execution_total{agent_id="execution_agent"}[15m])), 0.001)
+          ) > 0.05
+          and
+          sum(increase(mas_agent_execution_total{agent_id="execution_agent"}[15m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MAS retry rate is high"
+          description: "Retry ratio exceeded 5% for execution_agent in the last 15m."
+
+      - alert: MasRetryBurstCritical
+        expr: sum(increase(mas_agent_retries_total[15m])) >= 50
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MAS retry burst detected"
+          description: "MAS retries exceeded 50 events in 15m."

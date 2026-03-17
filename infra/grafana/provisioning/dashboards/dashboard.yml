@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: xh-platform
+    orgId: 1
+    folder: XH Platform
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
+

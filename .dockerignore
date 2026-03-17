@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+.venv
+.next
+node_modules
+artifacts
+.git
+.env

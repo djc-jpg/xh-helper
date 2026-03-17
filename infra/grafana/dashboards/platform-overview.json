@@ -1,0 +1,317 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"api\"}[5m])) by (le))",
+          "legendFormat": "api_p95",
+          "refId": "A"
+        }
+      ],
+      "title": "API p95 Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(task_success_total[15m])) / clamp_min(sum(rate(task_total[15m])), 1)",
+          "legendFormat": "success_rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Task Success Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(task_failure_total[5m]))",
+          "legendFormat": "failure_rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Task Failure Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum(rate(workflow_retries_total[5m]))",
+          "legendFormat": "retry_rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Retry Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(task_cost_usd)",
+          "legendFormat": "cost_usd",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Cost (USD)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "1 - (sum by (agent_id) (rate(mas_agent_execution_total{outcome=\"failed\"}[15m])) / clamp_min(sum by (agent_id) (rate(mas_agent_execution_total[15m])), 0.001))",
+          "legendFormat": "{{agent_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MAS Agent Success Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "mas_message_queue_backlog",
+          "legendFormat": "{{receiver}}/{{backend}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MAS Queue Backlog",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum by (agent_id, failure_type) (rate(mas_agent_retries_total[5m]))",
+          "legendFormat": "{{agent_id}}/{{failure_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MAS Failure Types (Retries)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum(rate(mas_agent_decisions_total{agent_id=\"execution_agent\",decision=\"THROTTLE\"}[10m])) / clamp_min(sum(rate(mas_agent_decisions_total{agent_id=\"execution_agent\"}[10m])), 0.001)",
+          "legendFormat": "throttle_hit_ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Execution Agent Rate-Limit Hit Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum(rate(mas_agent_retries_total[15m])) / clamp_min(sum(rate(mas_agent_execution_total{agent_id=\"execution_agent\"}[15m])), 0.001)",
+          "legendFormat": "retry_ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "MAS Retry Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "mas_agent_inflight",
+          "legendFormat": "{{agent_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MAS Agent Inflight",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (agent_id, step, le) (rate(mas_agent_step_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{agent_id}}/{{step}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MAS Step p95 Latency",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "XH Platform Overview",
+  "version": 2
+}

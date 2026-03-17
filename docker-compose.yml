@@ -1,0 +1,272 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: xh-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform}
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/00-create-temporal.sql:/docker-entrypoint-initdb.d/00-create-temporal.sql:ro
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: xh-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: xh-temporal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-platform}
+      POSTGRES_SEEDS: postgres
+      POSTGRES_DB: temporal
+    ports:
+      - "7233:7233"
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address temporal:7233 cluster health | grep -q SERVING"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    container_name: xh-temporal-ui
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8088:8080"
+
+  fake-internal-service:
+    build:
+      context: .
+      dockerfile: services/fake-internal-service/Dockerfile
+    container_name: xh-fake-internal
+    env_file:
+      - .env
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${FAKE_INTERNAL_SERVICE_TOKEN}
+      OTEL_SERVICE_NAME: fake-internal-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "8100:8100"
+    depends_on:
+      - otel-collector
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: xh-api
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_TTL_MIN: ${ACCESS_TOKEN_TTL_MIN:-30}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-7}
+      TEMPORAL_TARGET: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      WORKER_AUTH_TOKENS: '${WORKER_AUTH_TOKENS:-{}}'
+      ALLOWED_WORKER_IDS: '${ALLOWED_WORKER_IDS:-["worker-local"]}'
+      DEFAULT_WORKER_ID: ${DEFAULT_WORKER_ID:-worker-local}
+      FAKE_INTERNAL_BASE_URL: ${FAKE_INTERNAL_BASE_URL:-http://fake-internal-service:8100}
+      FAKE_INTERNAL_SERVICE_TOKEN: ${FAKE_INTERNAL_SERVICE_TOKEN}
+      INPUT_ENCRYPTION_KEY: ${INPUT_ENCRYPTION_KEY}
+      SEED_OWNER_EMAIL: ${SEED_OWNER_EMAIL}
+      SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD}
+      SEED_OPERATOR_EMAIL: ${SEED_OPERATOR_EMAIL}
+      SEED_OPERATOR_PASSWORD: ${SEED_OPERATOR_PASSWORD}
+      SEED_USER_EMAIL: ${SEED_USER_EMAIL}
+      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD}
+      APPROVAL_SIGNAL_DISPATCHER_ENABLED: ${APPROVAL_SIGNAL_DISPATCHER_ENABLED:-true}
+      APPROVAL_SIGNAL_DISPATCH_INTERVAL_S: ${APPROVAL_SIGNAL_DISPATCH_INTERVAL_S:-2}
+      APPROVAL_SIGNAL_DISPATCH_BATCH_SIZE: ${APPROVAL_SIGNAL_DISPATCH_BATCH_SIZE:-20}
+      APPROVAL_SIGNAL_RETRY_BASE_DELAY_S: ${APPROVAL_SIGNAL_RETRY_BASE_DELAY_S:-2}
+      APPROVAL_SIGNAL_RETRY_MAX_DELAY_S: ${APPROVAL_SIGNAL_RETRY_MAX_DELAY_S:-30}
+      APPROVAL_SIGNAL_RETRY_MAX_ATTEMPTS: ${APPROVAL_SIGNAL_RETRY_MAX_ATTEMPTS:-6}
+      TEMPORAL_SIGNAL_FAIL_ONCE: ${TEMPORAL_SIGNAL_FAIL_ONCE:-false}
+      RERUN_CONFLICT_TEST_MODE: ${RERUN_CONFLICT_TEST_MODE:-false}
+      ARTIFACT_DIR: /workspace/artifacts
+      OTEL_SERVICE_NAME: api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    ports:
+      - "18000:8000"
+    volumes:
+      - ./artifacts:/workspace/artifacts
+      - ./data:/workspace/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      fake-internal-service:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: xh-worker
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}}
+      API_BASE_URL: http://api:8000
+      TEMPORAL_TARGET: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: xh-task-queue
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      WORKER_AUTH_TOKEN: ${WORKER_AUTH_TOKEN:-}
+      WORKER_ID: ${DEFAULT_WORKER_ID:-worker-local}
+      LANGGRAPH_POSTGRES_DSN: ${LANGGRAPH_POSTGRES_DSN:-postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}}
+      LANGGRAPH_CHECKPOINT_FAIL_FAST: ${LANGGRAPH_CHECKPOINT_FAIL_FAST:-false}
+      DOCS_DIR: /workspace/data/docs
+      OTEL_SERVICE_NAME: worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      MAS_ENABLED: ${MAS_ENABLED:-false}
+      # closed_loop uses LangGraph as primary MAS orchestrator; gate keeps legacy gate mode.
+      MAS_ORCHESTRATION_MODE: ${MAS_ORCHESTRATION_MODE:-closed_loop}
+      MAS_MESSAGE_BACKEND: ${MAS_MESSAGE_BACKEND:-memory}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MAS_CACHE_TTL_S: ${MAS_CACHE_TTL_S:-120}
+      MAS_RATE_LIMIT_REQUESTS: ${MAS_RATE_LIMIT_REQUESTS:-30}
+      MAS_RATE_LIMIT_WINDOW_S: ${MAS_RATE_LIMIT_WINDOW_S:-60}
+      MAS_RETRY_MAX_ATTEMPTS: ${MAS_RETRY_MAX_ATTEMPTS:-3}
+      MAS_RETRY_BASE_DELAY_S: ${MAS_RETRY_BASE_DELAY_S:-1}
+      MAS_RETRY_MAX_DELAY_S: ${MAS_RETRY_MAX_DELAY_S:-10}
+      MAS_SHADOW_MODE: ${MAS_SHADOW_MODE:-false}
+    ports:
+      - "9001:9001"
+    volumes:
+      - ./artifacts:/workspace/artifacts
+      - ./data:/workspace/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; d=urllib.request.urlopen('http://localhost:9001/metrics',timeout=2).read().decode(); sys.exit(0 if 'worker_temporal_connected 1.0' in d else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    env_file:
+      - .env
+    container_name: xh-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:18000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: xh-prometheus
+    environment:
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$${INTERNAL_API_TOKEN}" ]; then
+          echo "ERROR: INTERNAL_API_TOKEN is required for Prometheus scrape authorization." >&2
+          exit 1
+        fi
+        printf "%s" "$${INTERNAL_API_TOKEN}" > /tmp/internal_api_token
+        chmod 0644 /tmp/internal_api_token
+        exec /bin/prometheus \
+          --config.file=/etc/prometheus/prometheus.yml \
+          --storage.tsdb.path=/prometheus \
+          --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    depends_on:
+      - api
+      - worker
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: xh-grafana
+    env_file:
+      - .env
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.102.1
+    container_name: xh-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "9464:9464"
+
+volumes:
+  pgdata:

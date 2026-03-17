@@ -1,0 +1,115 @@
+cases:
+  - id: rag_1
+    role: user
+    task_type: rag_qa
+    input:
+      question: What are incident response steps?
+    budget: 1.0
+    expect_status: SUCCEEDED
+    expect_hitl: false
+    expected_substrings: ["citations"]
+
+  - id: rag_2
+    role: user
+    task_type: rag_qa
+    input:
+      question: What reliability semantics are listed in product notes?
+    budget: 1.0
+    expect_status: SUCCEEDED
+    expect_hitl: false
+    expected_substrings: ["citations"]
+
+  - id: rag_3
+    role: user
+    task_type: rag_qa
+    input:
+      question: What does the security baseline block by default?
+    budget: 1.0
+    expect_status: SUCCEEDED
+    expect_hitl: false
+    expected_substrings: ["citations"]
+
+  - id: tool_query_1
+    role: user
+    task_type: tool_flow
+    input:
+      action: query
+      query: all
+    budget: 1.2
+    expect_status: SUCCEEDED
+    expect_hitl: false
+    expected_substrings: ["Tool flow done"]
+
+  - id: tool_create_1
+    role: operator
+    task_type: tool_flow
+    input:
+      action: create
+      name: alpha
+      value: v1
+      idempotency_key: idem-create-1
+    budget: 1.2
+    expect_status: SUCCEEDED
+    expect_hitl: true
+    approval_action: approve
+    expected_substrings: ["Tool flow done"]
+
+  - id: force_400
+    role: operator
+    task_type: tool_flow
+    input:
+      action: query
+      query: force_400
+    budget: 1.2
+    expect_status: FAILED_FINAL
+    expect_hitl: false
+
+  - id: force_500
+    role: operator
+    task_type: tool_flow
+    input:
+      action: query
+      query: force_500
+    budget: 1.2
+    expect_status: FAILED_RETRYABLE
+    expect_hitl: false
+
+  - id: ticket_1
+    role: operator
+    task_type: ticket_email
+    input:
+      content: Customer reports incident and outage on checkout.
+      target: support@example.com
+      subject: Checkout incident
+    budget: 1.5
+    expect_status: SUCCEEDED
+    expect_hitl: true
+    approval_action: approve
+    expected_substrings: ["Draft approved"]
+
+  - id: ticket_2
+    role: operator
+    task_type: ticket_email
+    input:
+      content: Please update invoice mailing address.
+      target: billing@example.com
+      subject: Address update
+    budget: 1.5
+    expect_status: SUCCEEDED
+    expect_hitl: true
+    approval_action: edit
+    edited_output: "Edited by operator: please confirm address update."
+    expected_substrings: ["Edited by operator"]
+
+  - id: ticket_3
+    role: operator
+    task_type: ticket_email
+    input:
+      content: Need SLA clarification for support plan.
+      target: cs@example.com
+      subject: SLA question
+    budget: 1.5
+    expect_status: SUCCEEDED
+    expect_hitl: true
+    approval_action: approve
+    expected_substrings: ["Draft approved"]

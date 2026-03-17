@@ -1,0 +1,165 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+jobs:
+  unit_light:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare env file
+        run: cp .env.example .env
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Compile Python
+        run: |
+          python -m py_compile $(find apps/api -name "*.py")
+          python -m py_compile $(find apps/worker -name "*.py")
+          python -m py_compile $(find services/fake-internal-service -name "*.py")
+          python -m py_compile eval/run_eval.py
+          python -m py_compile scripts/test.py
+          python -m py_compile scripts/eval.py
+          python -m py_compile scripts/verify_release.py
+
+      - name: Precheck eval YAML
+        run: python eval/check_cases_yaml.py eval/golden_cases.yaml
+
+      - name: Run unit/light tests
+        run: python scripts/test.py -q
+
+      - name: Smoke direct pytest entrypoint (README)
+        run: python -m pytest -q apps/worker/tests --collect-only
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        run: |
+          npm --prefix apps/frontend ci
+          npm --prefix apps/frontend run build
+
+  integration_eval:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    needs: unit_light
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare env file
+        run: |
+          cp .env.example .env
+          echo "TEMPORAL_SIGNAL_FAIL_ONCE=true" >> .env
+          echo "RERUN_CONFLICT_TEST_MODE=true" >> .env
+          echo "MAS_ENABLED=true" >> .env
+          echo "MAS_ORCHESTRATION_MODE=closed_loop" >> .env
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Boot stack
+        run: docker compose up -d --build postgres temporal temporal-ui otel-collector fake-internal-service api worker prometheus
+
+      - name: Wait API
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:18000/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs api
+          exit 1
+
+      - name: Wait Temporal and Worker
+        run: |
+          for i in $(seq 1 90); do
+            TEMPORAL_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' xh-temporal 2>/dev/null || true)
+            WORKER_HEALTH=$(docker inspect --format '{{.State.Health.Status}}' xh-worker 2>/dev/null || true)
+            if [ "$TEMPORAL_HEALTH" = "healthy" ] && [ "$WORKER_HEALTH" = "healthy" ]; then
+              echo "temporal=$TEMPORAL_HEALTH worker=$WORKER_HEALTH"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps -a
+          docker compose logs temporal worker api
+          exit 1
+
+      - name: Wait Prometheus
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:9090/-/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs prometheus
+          exit 1
+
+      - name: Seed users
+        run: docker compose exec -T api python -m app.seed
+
+      - name: Run verification bundle (integration + eval + checks)
+        run: |
+          python scripts/verify_release.py \
+            --base-url http://localhost:18000 \
+            --prom-url http://localhost:9090 \
+            --cases eval/golden_cases.yaml \
+            --summary-dir artifacts/verification/ci-${{ github.run_id }} \
+            --skip-docker-up \
+            --skip-docker-down \
+            --skip-seed
+
+      - name: Verify required spans in trace backend
+        run: |
+          for i in $(seq 1 20); do
+            LOGS="$(docker compose logs otel-collector || true)"
+            echo "$LOGS" | grep -Eq "Name[[:space:]]*:[[:space:]]*planner" && \
+            echo "$LOGS" | grep -Eq "Name[[:space:]]*:[[:space:]]*retrieval" && \
+            echo "$LOGS" | grep -Eq "Name[[:space:]]*:[[:space:]]*llm_call" && \
+            echo "$LOGS" | grep -Eq "Name[[:space:]]*:[[:space:]]*review" && \
+            echo "$LOGS" | grep -Eq "Name[[:space:]]*:[[:space:]]*tool_call" && \
+            echo "$LOGS" | grep -Eq "Name[[:space:]]*:[[:space:]]*approval_wait" && exit 0
+            sleep 2
+          done
+          docker compose logs otel-collector
+          exit 1
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs api worker fake-internal-service temporal
+
+      - name: Upload verification summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-summary-${{ github.run_id }}
+          path: artifacts/verification/ci-${{ github.run_id }}
+
+      - name: Shutdown
+        if: always()
+        run: docker compose down -v

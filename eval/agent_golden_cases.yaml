@@ -1,0 +1,43 @@
+cases:
+  - id: force_400
+    role: operator
+    task_type: tool_flow
+    input:
+      action: query
+      query: force_400
+    budget: 1.2
+    expect_status: FAILED_FINAL
+    expect_hitl: false
+
+  - id: force_500
+    role: operator
+    task_type: tool_flow
+    input:
+      action: query
+      query: force_500
+    budget: 1.2
+    expect_status: FAILED_RETRYABLE
+    expect_hitl: false
+
+  - id: assistant_direct_1
+    mode: assistant
+    role: user
+    request_timeout_s: 60
+    input:
+      conversation_id: agent-eval-direct
+      message: Hello
+      mode: auto
+    expect_route: direct_answer
+    expect_response_type: direct_answer
+
+  - id: assistant_runtime_1
+    mode: assistant
+    role: user
+    request_timeout_s: 90
+    input:
+      conversation_id: agent-eval-runtime
+      message: Please prepare a grounded summary of incident response steps with citations and continue through the durable runtime if needed.
+      mode: auto
+    expect_response_type: task_created
+    expect_task_trace: true
+    expect_runtime_debugger: true
