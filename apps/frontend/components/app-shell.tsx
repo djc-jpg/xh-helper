@@ -17,48 +17,48 @@ function resolveWorkspaceCopy(pathname: string): { title: string; subtitle: stri
   if (pathname === "/") {
     return {
       title: "项目概览",
-      subtitle: "从求职作品视角快速了解 xh-helper 的 Agent 能力与工程亮点"
+      subtitle: "用作品展示页快速理解 xh-helper 的 Agent 能力、系统链路和演示入口"
     };
   }
   if (pathname.startsWith("/assistant")) {
     return {
       title: "智能体工作台",
-      subtitle: "和 xh-helper 对话，查看目标、策略、动作与运行时调试信息"
+      subtitle: "像 ChatGPT 一样协作，同时查看 goal、动作、why-not 和 runtime debugger"
     };
   }
   if (pathname.startsWith("/runs")) {
     return {
       title: "运行实况",
-      subtitle: "查看持久执行、循环过程、证据、判定与任务追踪"
+      subtitle: "查看 durable workflow、循环步骤、证据、判定结果和追踪信息"
     };
   }
   if (pathname.startsWith("/playground")) {
     return {
       title: "发起运行",
-      subtitle: "启动新的受控任务，验证不同输入和预算下的系统行为"
+      subtitle: "从工程化入口创建任务，验证不同输入、预算和路径下的系统行为"
     };
   }
   if (pathname.startsWith("/approvals")) {
     return {
       title: "审批中心",
-      subtitle: "处理高风险动作、人工确认与等待恢复链路"
+      subtitle: "处理高风险动作、人工确认以及等待恢复链路"
     };
   }
   if (pathname.startsWith("/monitoring")) {
     return {
       title: "运行观测",
-      subtitle: "追踪系统健康度、告警信号、吞吐表现和运行趋势"
+      subtitle: "查看系统健康度、吞吐表现和运行趋势"
     };
   }
   if (pathname.startsWith("/settings")) {
     return {
       title: "系统设置",
-      subtitle: "调整访问、策略和工作台偏好设置"
+      subtitle: "调整策略、访问控制和工作台配置"
     };
   }
   return {
     title: "xh-helper",
-    subtitle: "通用智能体运行时控制台"
+    subtitle: "通用任务智能体运行时控制台"
   };
 }
 
@@ -98,7 +98,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="app-brand-mark">xh</span>
             <div className="stack-gap-xs">
               <span className="app-brand-title">xh-helper</span>
-              <span className="app-brand-subtitle">通用智能体运行时</span>
+              <span className="app-brand-subtitle">通用任务智能体运行时</span>
             </div>
           </Link>
 

@@ -7,7 +7,7 @@ import { Providers } from "../lib/providers";
 
 export const metadata: Metadata = {
   title: "xh-helper",
-  description: "xh-helper 是一个面向持久目标、策略调试、审批治理和外部事件驱动执行的通用智能体工作台。"
+  description: "xh-helper 是一个面向持久目标、策略调试、审批治理和外部事件驱动执行的通用任务智能体工作台。"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

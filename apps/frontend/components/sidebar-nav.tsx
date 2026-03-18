@@ -8,7 +8,7 @@ const ITEMS = [
   { href: "/runs", label: "运行", hint: "查看持久循环与追踪" },
   { href: "/playground", label: "发起", hint: "启动新的受控任务" },
   { href: "/approvals", label: "审批", hint: "处理高风险动作" },
-  { href: "/monitoring", label: "观测", hint: "跟踪运行时健康状态" },
+  { href: "/monitoring", label: "观测", hint: "跟踪系统健康状态" },
   { href: "/settings", label: "设置", hint: "调整策略与访问控制" }
 ];
 
