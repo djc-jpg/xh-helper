@@ -31,7 +31,7 @@ export function EvidencePanel({ evidence }: { evidence: EvidenceItem[] }) {
         {filtered.map((item, index) => (
           <article key={`${item.id || item.source || "evidence"}-${index}`} className="sub-panel stack-gap-xs">
             <div className="sub-panel-head">
-              <strong>{item.title || item.source || `Evidence ${index + 1}`}</strong>
+              <strong>{item.title || item.source || `证据 ${index + 1}`}</strong>
               {item.conflict ? <span className="tag tag-danger">冲突</span> : null}
             </div>
             {item.snippet ? <p className="muted-text">{item.snippet}</p> : null}

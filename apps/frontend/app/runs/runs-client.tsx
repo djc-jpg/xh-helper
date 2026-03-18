@@ -103,10 +103,10 @@ export function RunsPageClient() {
       <div className="stack-gap-md">
         <SectionCard
           title="闭环运行总览"
-          subtitle="面向多智能体协作闭环的运行入口，支持 phase/turn/budget/verdict 维度筛选。"
+          subtitle="面向多智能体协作闭环的运行入口，支持阶段、轮次、预算和判定结果筛选。"
           actions={
             <Link href="/playground" className="btn btn-primary">
-              新建 Run
+              新建运行
             </Link>
           }
         >
@@ -216,17 +216,18 @@ export function RunsPageClient() {
                 <thead>
                   <tr>
                     <th>Run</th>
-                    <th>Task Type</th>
+                    <th>运行 ID</th>
+                    <th>任务类型</th>
                     <th>状态</th>
-                    <th>Phase</th>
-                    <th>Turn</th>
-                    <th>Retry</th>
-                    <th>Verdict</th>
-                    <th>Risk</th>
+                    <th>阶段</th>
+                    <th>轮次</th>
+                    <th>重试</th>
+                    <th>判定</th>
+                    <th>风险</th>
                     <th>成本</th>
                     <th>创建时间</th>
                     <th>结束时间</th>
-                    <th>Trace</th>
+                    <th>追踪</th>
                   </tr>
                 </thead>
                 <tbody>

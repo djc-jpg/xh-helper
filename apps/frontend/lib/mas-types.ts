@@ -187,6 +187,8 @@ export interface AgentDecision {
   confidence?: number | null;
   need_confirmation: boolean;
   summary?: string | null;
+  why_not?: Record<string, string>;
+  candidate_actions?: Array<Record<string, unknown>>;
 }
 
 export interface AgentReflection {
@@ -211,6 +213,10 @@ export interface AgentAction {
   input: Record<string, unknown>;
   requires_approval: boolean;
   status: string;
+  expected_result?: string | null;
+  success_conditions?: string[];
+  fallback?: string | null;
+  stop_conditions?: string[];
 }
 
 export interface AgentPolicy {
@@ -273,6 +279,27 @@ export interface AgentRuntimeStep {
   observation?: AgentObservation | null;
   decision?: AgentDecision | null;
   reflection?: AgentReflection | null;
+  state_before?: Record<string, unknown> | null;
+  state_after?: Record<string, unknown> | null;
+}
+
+export interface RuntimeDebuggerActionContract {
+  action_type?: string | null;
+  expected_result?: string | null;
+  success_conditions: string[];
+  fallback?: string | null;
+  stop_conditions: string[];
+}
+
+export interface RuntimeDebuggerView {
+  state_before?: Record<string, unknown> | null;
+  latest_observation?: Record<string, unknown> | null;
+  decision?: Record<string, unknown> | null;
+  why_not: Record<string, string>;
+  candidate_actions: Array<Record<string, unknown>>;
+  reflection?: Record<string, unknown> | null;
+  state_after?: Record<string, unknown> | null;
+  action_contract?: RuntimeDebuggerActionContract | null;
 }
 
 export interface AgentRun {
@@ -417,6 +444,8 @@ export interface AssistantTaskTrace {
   episodes: AgentEpisode[];
   reflection?: AgentReflection | null;
   trace_steps: AssistantTraceStep[];
+  runtime_steps?: AgentRuntimeStep[];
+  runtime_debugger?: RuntimeDebuggerView | null;
   tool_calls: AssistantTraceToolCall[];
   approvals: AssistantTraceApproval[];
   run_history: Array<Record<string, unknown>>;

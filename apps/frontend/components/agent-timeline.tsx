@@ -62,7 +62,7 @@ export function AgentTimeline({ events }: { events: TimelineEvent[] }) {
         </select>
       </div>
 
-      <ol className="timeline-list" aria-label="agent timeline">
+      <ol className="timeline-list" aria-label="智能体时间线">
         {filtered.map((event) => (
           <li
             key={event.id}
@@ -72,15 +72,15 @@ export function AgentTimeline({ events }: { events: TimelineEvent[] }) {
             <div className="timeline-head">
               <div className="timeline-title-row">
                 <strong>{event.title}</strong>
-                {event.fallbackHighlighted ? <span className="tag tag-warning">Critic FAIL -&gt; Planner 修订</span> : null}
+                {event.fallbackHighlighted ? <span className="tag tag-warning">评审失败 -&gt; 重新规划</span> : null}
               </div>
               <div className="timeline-meta">
                 <span>{event.agent}</span>
                 <span>{event.type}</span>
-                {event.phase ? <span>phase={event.phase}</span> : null}
-                {event.turn ? <span>turn={event.turn}</span> : null}
-                {event.status ? <span>status={event.status}</span> : null}
-                {event.verdict ? <span>verdict={event.verdict}</span> : null}
+                {event.phase ? <span>阶段={event.phase}</span> : null}
+                {event.turn ? <span>轮次={event.turn}</span> : null}
+                {event.status ? <span>状态={event.status}</span> : null}
+                {event.verdict ? <span>判定={event.verdict}</span> : null}
                 {event.ts ? <span>{formatDateTime(event.ts)}</span> : null}
               </div>
             </div>

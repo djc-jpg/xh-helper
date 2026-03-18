@@ -6,8 +6,8 @@ import { AppShell } from "../components/app-shell";
 import { Providers } from "../lib/providers";
 
 export const metadata: Metadata = {
-  title: "多智能体闭环协作控制台",
-  description: "MAS + LangGraph 专业控制台，提供闭环可观测、调试与灰度能力。"
+  title: "xh-helper",
+  description: "xh-helper 是一个面向持久目标、策略调试、审批治理和外部事件驱动执行的通用智能体工作台。"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

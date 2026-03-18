@@ -177,29 +177,29 @@ export default function RunDetailPage() {
                   <StatusBadge status={runStatus} />
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Verdict</p>
+                  <p className="panel-subtitle">判定结果</p>
                   <p className="metric-value">{critic.verdict}</p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Phase / Turn</p>
+                  <p className="panel-subtitle">阶段 / 轮次</p>
                   <p className="metric-value">
                     {snapshot.phase || "-"} / {snapshot.turn ?? "-"}
                   </p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Graph Engine</p>
+                  <p className="panel-subtitle">图执行引擎</p>
                   <p className="metric-value">{graphEngine}</p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Retry Budget</p>
+                  <p className="panel-subtitle">重试预算</p>
                   <p className="metric-value">{snapshot.retry_budget?.remaining ?? "-"}</p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Latency Budget (ms)</p>
+                  <p className="panel-subtitle">时延预算（毫秒）</p>
                   <p className="metric-value">{snapshot.latency_budget?.remaining_ms ?? "-"}</p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Risk Level</p>
+                  <p className="panel-subtitle">风险等级</p>
                   <p className="metric-value">{snapshot.risk_level || "unknown"}</p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
@@ -231,10 +231,10 @@ export default function RunDetailPage() {
 
             <div className="grid cols-2">
               <SectionCard
-                title="Agent Timeline"
-                subtitle="10 Agent 事件流（支持结构化 JSON 展开，回退重规划高亮）"
+                title="智能体时间线"
+                subtitle="多智能体事件流，支持结构化 JSON 展开和回退重规划高亮。"
                 actions={
-                  <span className="muted-text">SSE 事件: {streamEvents.length > 0 ? `${streamEvents.length} 条` : "未接入"}</span>
+                  <span className="muted-text">SSE 事件：{streamEvents.length > 0 ? `${streamEvents.length} 条` : "未接入"}</span>
                 }
               >
                 {mergedTimeline.length > 0 ? (
@@ -249,11 +249,11 @@ export default function RunDetailPage() {
                   <CriticPanel verdict={critic} />
                 </SectionCard>
 
-                <SectionCard title="Evidence 证据包" subtitle="可搜索、可展开，支持冲突标记">
+                <SectionCard title="证据包" subtitle="支持搜索、展开原始内容，并展示冲突标记。">
                   <EvidencePanel evidence={evidence} />
                 </SectionCard>
 
-                <SectionCard title="Metrics 可观测" subtitle="运行指标与原始 metrics JSON">
+                <SectionCard title="运行指标" subtitle="查看核心指标与原始 metrics JSON。">
                   <MetricsPanel metrics={metrics} />
                 </SectionCard>
               </div>
@@ -267,7 +267,7 @@ export default function RunDetailPage() {
                   <p>{envelope?.mode || "workflow"}</p>
                 </div>
                 <div className="sub-panel stack-gap-xs">
-                  <p className="panel-subtitle">Failure Semantic</p>
+                  <p className="panel-subtitle">失败语义</p>
                   <p>{envelope?.failure_semantic || "-"}</p>
                 </div>
               </div>
