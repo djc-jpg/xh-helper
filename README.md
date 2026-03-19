@@ -4,6 +4,21 @@
 
 `xh-helper` 是一个面向真实任务执行场景的 Agent Runtime / 通用任务智能体后端系统：它把用户请求收敛为 `goal / action / state / policy / reflection`，再通过 durable workflow、审批、人类介入、外部事件、策略记忆和评测闭环去推进任务，而不是停留在“会调几个工具的聊天机器人”层面。
 
+## 当前阶段
+
+当前仓库建议按“可演示的稳态 L3 助手”来理解。
+
+- 能正常进行中文问答
+- 高风险动作会先确认
+- 明确要求“继续跟进 / 持续执行”时可进入 workflow task
+- 任务完成后能继续承接“现在进展到哪一步了？”这类追问
+- 失败、等待、继续执行这些关键状态会尽量用客户能理解的话反馈出来
+
+阶段收尾说明见：
+
+- [docs/L3_PHASE_WRAPUP.md](docs/L3_PHASE_WRAPUP.md)
+- [docs/L3_DEMO_SCRIPT.md](docs/L3_DEMO_SCRIPT.md)
+
 ## 项目截图
 
 > 截图来自本地 Docker Compose 环境，主要用于展示项目作为求职作品时的实际界面形态。
@@ -406,6 +421,10 @@ make seed
 3. 进入 `/assistant` 发起一个请求
 4. 进入 `/runs` 查看运行轨迹
 
+如果你想按当前最稳的演示路径来试，建议优先参考：
+
+- [docs/L3_DEMO_SCRIPT.md](docs/L3_DEMO_SCRIPT.md)
+
 ---
 
 ## 8. 一个最小演示场景
@@ -457,6 +476,16 @@ python scripts/demo_cli.py approve --task-id <task_id>
 - 请求不是直接变成一次工具调用
 - 任务可以等待、恢复和继续推进
 - 前端和后端都能解释系统为什么这么做
+
+如果你希望走当前更稳的客户演示路径，建议优先使用：
+
+- 中文仓库原理问答
+- 高风险确认
+- 持续执行任务
+- 任务进展追问
+- 模块关系解释
+
+完整脚本见：[docs/L3_DEMO_SCRIPT.md](docs/L3_DEMO_SCRIPT.md)
 
 ---
 
@@ -519,15 +548,18 @@ python scripts/demo_cli.py approve --task-id <task_id>
 
 ### 已实现
 
+- 可演示的稳态 L3 助手主路径
 - 统一 Runtime Backbone
 - Temporal durable workflow
 - goal / subgoal / wake graph / portfolio scheduler
 - approval / wait-resume / external signal
 - policy memory / shadow / canary / eval runner
 - 聊天式工作台、运行详情页、runtime debugger
+- 中文问答、高风险确认、持续执行、任务进展追问、自然失败反馈
 
 ### 规划中
 
+- 更强的回答事实可靠性与引用约束
 - 更丰富的真实 external adapters 接入
 - 更强的长期策略学习与 portfolio outcome learning
 - 更完整的长期 memory conflict resolution / forgetting
