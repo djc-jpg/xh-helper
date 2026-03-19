@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 ACTION_TYPES = (
@@ -20,6 +21,7 @@ TOOL_PREPARATION_ACTIONS = {"tool_call", "workflow_call", "approval_request"}
 IN_PROGRESS_STATUSES = {"QUEUED", "VALIDATING", "PLANNING", "RUNNING", "WAITING_TOOL", "REVIEWING", "IN_PROGRESS"}
 WAITING_STATUSES = {"WAITING_HUMAN", "WAITING_APPROVAL"}
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED_FINAL", "FAILED_RETRYABLE", "CANCELLED", "TIMED_OUT"}
+WORD_PATTERN = re.compile(r"[a-z0-9_]+")
 LEGACY_ACTION_TO_RUNTIME_ACTION = {
     "answer_only": "respond",
     "use_tool": "tool_call",
@@ -63,6 +65,61 @@ def _goal_requests_durable_runtime(goal: dict[str, Any]) -> bool:
         "use workflow",
     )
     return any(marker in normalized_goal for marker in durable_markers)
+
+
+def _normalized_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _is_explanatory_question(*, goal: dict[str, Any], planner: dict[str, Any]) -> bool:
+    normalized_goal = _normalized_text(goal.get("normalized_goal"))
+    if not normalized_goal:
+        return False
+
+    english_prefixes = (
+        "how does ",
+        "how do ",
+        "what is ",
+        "what are ",
+        "why does ",
+        "why is ",
+        "explain ",
+        "describe ",
+        "walk me through ",
+    )
+    chinese_prefixes = (
+        "怎么",
+        "如何",
+        "为什么",
+        "请解释",
+        "解释一下",
+        "解释下",
+        "介绍一下",
+        "介绍下",
+        "什么是",
+    )
+    chinese_markers = (
+        "是怎么",
+        "如何",
+        "为什么",
+        "工作原理",
+        "原理",
+        "什么意思",
+        "怎么工作",
+    )
+    english_question = any(normalized_goal.startswith(prefix) for prefix in english_prefixes)
+    chinese_question = any(normalized_goal.startswith(prefix) for prefix in chinese_prefixes)
+    if _contains_cjk(normalized_goal):
+        chinese_question = chinese_question or any(marker in normalized_goal for marker in chinese_markers)
+
+    planner_action = str(planner.get("action") or "").strip().lower()
+    planner_intent = str(planner.get("intent") or "").strip().lower()
+    planner_supports_qna = planner_action in {"answer_only", "use_retrieval"} or planner_intent == "general_qna"
+    return planner_supports_qna and (english_question or chinese_question)
 
 
 def _normalized_memory_key(value: Any) -> str:
@@ -734,6 +791,7 @@ def choose_next_action(
     selected_tool_reliability = _safe_float(selected_tool_memory.get("score"), 0.0)
     selected_tool_reliability_confidence = _safe_float(selected_tool_memory.get("confidence"), 0.0)
     explicit_durable_request = _goal_requests_durable_runtime(goal)
+    explanatory_question = _is_explanatory_question(goal=goal, planner=planner)
 
     if latest_result and latest_result.get("status") == "retryable_tool_failure":
         action_type = "replan"
@@ -768,6 +826,14 @@ def choose_next_action(
         action_type = "ask_user"
         reasons.append("goal still has ambiguous references that require user clarification")
         fallback_action = "retrieve"
+    elif explanatory_question and planner_action in {"use_retrieval", "answer_only"}:
+        if not has_retrieval_observation:
+            action_type = "retrieve"
+            reasons.append("the goal is an explanatory question, so retrieval should ground the answer before responding")
+        else:
+            action_type = "respond"
+            reasons.append("the goal is an explanatory question, so the runtime should answer instead of escalating to durable execution")
+        fallback_action = "respond"
     elif planner_action in {"use_retrieval", "answer_only"} and not has_retrieval_observation:
         action_type = "retrieve"
         reasons.append("ground the goal before responding")
@@ -815,6 +881,7 @@ def choose_next_action(
         fallback_action = "retrieve"
     elif (
         requested_mode != "tool_task"
+        and not explanatory_question
         and workflow_signal >= max(0.75, tool_signal)
         and "workflow_call" in available_actions
     ):
@@ -822,7 +889,8 @@ def choose_next_action(
         reasons.append("planner signal rates durable execution as the strongest next move")
         fallback_action = "respond"
     elif (
-        workflow_bias > tool_bias
+        not explanatory_question
+        and workflow_bias > tool_bias
         and memory_confidence >= 0.4
         and "workflow_call" in available_actions
         and requested_mode not in {"tool_task", "direct_answer"}
@@ -838,12 +906,18 @@ def choose_next_action(
         action_type = "ask_user"
         reasons.append("similar past episodes needed user clarification before continuing")
         fallback_action = "retrieve"
-    elif requested_mode != "tool_task" and strategy_hint == "workflow_call" and "workflow_call" in available_actions:
+    elif (
+        requested_mode != "tool_task"
+        and not explanatory_question
+        and strategy_hint == "workflow_call"
+        and "workflow_call" in available_actions
+    ):
         action_type = "workflow_call"
         reasons.append("similar successful episode suggests durable execution for this open-ended goal")
         fallback_action = "respond"
     elif (
         experience["preferred_action"] == "workflow_call"
+        and not explanatory_question
         and "workflow_call" in available_actions
         and requested_mode not in {"tool_task", "direct_answer"}
     ):
@@ -855,7 +929,8 @@ def choose_next_action(
         reasons.append("planner and registry both indicate a direct tool execution path")
         fallback_action = "workflow_call" if "workflow_call" in available_actions else "respond"
     elif planner_action in {"start_workflow", "need_approval"} or (
-        requested_mode != "tool_task"
+        not explanatory_question
+        and requested_mode != "tool_task"
         and any(hint in str(goal.get("normalized_goal") or "").lower() for hint in COMPLEX_HINTS)
     ):
         action_type = "workflow_call"

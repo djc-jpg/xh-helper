@@ -136,6 +136,10 @@ class AssistantChatRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AssistantConversationUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+
+
 class AssistantTaskRef(BaseModel):
     task_id: str
     run_id: str | None = None
@@ -290,6 +294,8 @@ class AssistantTurnSummary(BaseModel):
     route: str = Field(pattern="^(direct_answer|tool_task|workflow_task)$")
     status: str
     current_phase: str
+    display_state: str | None = None
+    display_summary: str | None = None
     response_type: str
     user_message: str
     assistant_message: str | None = None
@@ -343,6 +349,8 @@ class AssistantConversationSummary(BaseModel):
     updated_at: datetime | None = None
     last_user_message: str | None = None
     last_assistant_message: str | None = None
+    title: str | None = None
+    preview: str | None = None
     last_route: str | None = None
     task_count: int = 0
     running_task_count: int = 0
@@ -367,11 +375,15 @@ class AssistantTaskCard(BaseModel):
     trace_id: str
     result_preview: str | None = None
     failure_reason: str | None = None
+    chat_state: str | None = None
+    assistant_summary: str | None = None
 
 
 class AssistantConversationDetail(BaseModel):
     conversation_id: str
     user_id: str
+    title: str | None = None
+    preview: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     context_window: int = 0
@@ -416,6 +428,9 @@ class AssistantTraceApproval(BaseModel):
 class AssistantTaskTraceResponse(BaseModel):
     task: AssistantTaskCard
     task_summary: str
+    assistant_status: str | None = None
+    assistant_summary: str | None = None
+    next_step_hint: str | None = None
     planner: dict[str, Any] = Field(default_factory=dict)
     retrieval_hits: list[dict[str, Any]] = Field(default_factory=list)
     goal: AgentGoal | None = None

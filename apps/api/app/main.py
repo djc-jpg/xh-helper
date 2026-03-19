@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
@@ -37,6 +38,7 @@ from .schemas import (
     AssistantChatResponse,
     AssistantConversationDetail,
     AssistantConversationSummary,
+    AssistantConversationUpdateRequest,
     AssistantTaskCard,
     AssistantTaskTraceResponse,
     AssistantTurnSummary,
@@ -212,11 +214,34 @@ tracer = trace.get_tracer("api")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(PolicyCheckMiddleware)
+
+
+def _assistant_stream_event(payload: dict[str, Any]) -> bytes:
+    return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _assistant_stream_response_payload(result: dict[str, Any]) -> dict[str, Any]:
+    """Normalize service output into JSON-safe data before writing NDJSON."""
+    return jsonable_encoder(AssistantChatResponse(**result))
+
+
+def _assistant_stream_chunks(message: str) -> list[str]:
+    text = str(message or "")
+    if not text:
+        return []
+    if len(text) <= 180:
+        chunk_size = 10
+    elif len(text) <= 720:
+        chunk_size = 18
+    else:
+        chunk_size = 28
+    return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
 
 
 @app.middleware("http")
@@ -389,6 +414,50 @@ async def assistant_chat(
         return AssistantChatResponse(**result)
 
 
+@app.post("/assistant/chat/stream")
+async def assistant_chat_stream(
+    req: AssistantChatRequest,
+    request: Request,
+    user: dict[str, Any] = Depends(get_current_user),
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> StreamingResponse:
+    if str(req.user_id) != str(user["id"]):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user mismatch")
+    tenant_id = resolve_tenant_id(str(user["tenant_id"]), x_tenant_id)
+
+    async def event_generator():
+        yield _assistant_stream_event({"type": "start"})
+        try:
+            result = await service_assistant_chat(
+                conversation_repo=conversation_repo,
+                episode_repo=episode_repo,
+                turn_repo=turn_repo,
+                task_repo=task_repo,
+                tool_repo=tool_repo,
+                policy_repo=policy_repo,
+                goal_repo=goal_repo,
+                gateway=gateway,
+                req=req,
+                tenant_id=tenant_id,
+                user=user,
+                trace_id=request.state.trace_id,
+                start_workflow=start_task_workflow,
+            )
+            for chunk in _assistant_stream_chunks(str(result.get("message") or "")):
+                yield _assistant_stream_event({"type": "delta", "delta": chunk})
+                await asyncio.sleep(0.012)
+            yield _assistant_stream_event({"type": "complete", "response": _assistant_stream_response_payload(result)})
+        except asyncio.CancelledError:
+            raise
+        except HTTPException as exc:
+            yield _assistant_stream_event({"type": "error", "detail": str(exc.detail)})
+        except Exception as exc:
+            logger.exception("assistant_chat_stream_failed error=%s", exc)
+            yield _assistant_stream_event({"type": "error", "detail": "assistant_stream_failed"})
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
 @app.get("/assistant/conversations", response_model=list[AssistantConversationSummary])
 def list_assistant_conversations(
     limit: int = Query(default=30, ge=1, le=200),
@@ -439,9 +508,12 @@ def get_assistant_conversation(
     )
     turn_history = [AssistantTurnSummary(**build_turn_summary(row, task_card_by_turn_id.get(str(row.get("turn_id") or "")))) for row in turns]
     history = list(conversation.get("message_history") or [])
+    conversation_summary = build_conversation_summary(conversation)
     return AssistantConversationDetail(
         conversation_id=conversation_id,
         user_id=str(conversation["user_id"]),
+        title=conversation_summary.get("title"),
+        preview=conversation_summary.get("preview"),
         created_at=conversation.get("created_at"),
         updated_at=conversation.get("updated_at"),
         context_window=len(history),
@@ -450,6 +522,51 @@ def get_assistant_conversation(
         turn_history=turn_history,
         task_history=task_cards,
     )
+
+
+@app.patch("/assistant/conversations/{conversation_id}", response_model=AssistantConversationSummary)
+def update_assistant_conversation(
+    conversation_id: str,
+    req: AssistantConversationUpdateRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> AssistantConversationSummary:
+    tenant_id = resolve_tenant_id(str(user["tenant_id"]), x_tenant_id)
+    title = " ".join(str(req.title or "").split()) or None
+    try:
+        conversation = conversation_repo.update_title(
+            tenant_id=tenant_id,
+            user_id=str(user["id"]),
+            conversation_id=conversation_id,
+            title=title,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="conversation not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="conversation ownership mismatch") from exc
+    return AssistantConversationSummary(**build_conversation_summary(conversation))
+
+
+@app.delete("/assistant/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_assistant_conversation(
+    conversation_id: str,
+    user: dict[str, Any] = Depends(get_current_user),
+    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
+) -> Response:
+    tenant_id = resolve_tenant_id(str(user["tenant_id"]), x_tenant_id)
+    try:
+        conversation_repo.delete_conversation(
+            tenant_id=tenant_id,
+            user_id=str(user["id"]),
+            conversation_id=conversation_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="conversation not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="conversation ownership mismatch") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/assistant/tasks/{task_id}/trace", response_model=AssistantTaskTraceResponse)

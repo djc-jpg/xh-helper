@@ -11,26 +11,45 @@ STATUS_LABELS: dict[str, str] = {
     "VALIDATING": "校验中",
     "PLANNING": "规划中",
     "RUNNING": "执行中",
-    "WAITING_TOOL": "等待工具",
-    "WAITING_HUMAN": "等待审批",
+    "WAITING_TOOL": "等待工具结果",
+    "WAITING_HUMAN": "等待确认",
     "REVIEWING": "复核中",
     "SUCCEEDED": "已完成",
-    "FAILED_RETRYABLE": "执行失败（可重试）",
+    "FAILED_RETRYABLE": "执行失败，可重试",
     "FAILED_FINAL": "执行失败",
     "CANCELLED": "已取消",
     "TIMED_OUT": "已超时",
     "APPROVED": "已通过",
     "REJECTED": "已拒绝",
-    "EDITED": "已编辑并通过",
+    "EDITED": "已修改并通过",
 }
 
 STEP_LABELS: dict[str, str] = {
     "task_create": "已创建任务",
     "task_rerun": "已重新发起任务",
     "task_cancel": "任务已取消",
-    "workflow_start": "启动工作流",
-    "assistant_tool_run": "调用工具中",
+    "workflow_start": "已启动持续执行",
+    "assistant_tool_run": "正在调用工具",
     "assistant_tool_done": "工具调用完成",
+}
+
+FAILURE_REASON_LABELS: dict[str, str] = {
+    "workflow_start_failed": "持续执行任务启动失败，请稍后再试。",
+    "tool_denied": "这一步需要更高权限或人工确认后才能继续。",
+    "timed_out": "这次处理超时了，可以缩小范围后再试一次。",
+    "timeout": "这次处理超时了，可以缩小范围后再试一次。",
+    "adapter_http_408": "外部服务响应超时了，请稍后重试。",
+    "adapter_http_429": "外部服务当前较忙，请稍后重试。",
+    "adapter_http_5xx": "外部服务暂时不可用，请稍后重试。",
+    "adapter_network_error": "连接外部服务时出了问题，请稍后重试。",
+    "idempotency_in_progress": "同一个请求还在处理中，稍后就会同步结果。",
+    "write_requires_approval": "这一步需要你确认后我才能继续。",
+    "approval_not_approved": "因为没有通过确认，这次操作没有继续执行。",
+    "approval_invalid": "这次确认信息已经失效，请重新发起。",
+    "approval_context_invalid": "确认上下文已经变化，请重新发起这次操作。",
+    "qwen_not_configured": "当前模型服务还没有配置完成。",
+    "qwen_empty_response": "模型这次没有返回内容，请再试一次。",
+    "unknown_error": "这次处理没有成功完成，请稍后再试。",
 }
 
 
@@ -52,6 +71,52 @@ def _step_label(step_key: str) -> str:
     return step_key.replace("_", " ").strip()
 
 
+def _trim_text(value: Any, max_len: int = 96) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= max_len:
+        return collapsed
+    return f"{collapsed[: max_len - 3]}..."
+
+
+def _conversation_title(
+    explicit_title: str | None,
+    history: list[dict[str, Any]],
+    last_user: str | None,
+    last_assistant: str | None,
+) -> str:
+    persisted = _trim_text(explicit_title, 34)
+    if persisted:
+        return persisted
+    preferred = _trim_text(last_user, 34)
+    if preferred:
+        return preferred
+    for item in history:
+        if str(item.get("role") or "") == "user":
+            candidate = _trim_text(item.get("message"), 34)
+            if candidate:
+                return candidate
+    fallback = _trim_text(last_assistant, 34)
+    return fallback or "新对话"
+
+
+def _conversation_preview(
+    *,
+    last_assistant: str | None,
+    last_user: str | None,
+    running_task_count: int,
+    waiting_approval_count: int,
+) -> str:
+    if waiting_approval_count > 0:
+        return "这条对话里有任务正在等你确认。"
+    if running_task_count > 0:
+        return "这条对话里还有任务在继续执行。"
+    preview = _trim_text(last_assistant, 88) or _trim_text(last_user, 88)
+    return preview or "从这里继续刚才的对话。"
+
+
 def _extract_last_messages(history: list[dict[str, Any]]) -> tuple[str | None, str | None, str | None]:
     last_user = None
     last_assistant = None
@@ -71,16 +136,25 @@ def _extract_last_messages(history: list[dict[str, Any]]) -> tuple[str | None, s
 def build_conversation_summary(row: dict[str, Any]) -> dict[str, Any]:
     history = list(row.get("message_history") or [])
     last_user, last_assistant, last_route = _extract_last_messages(history)
+    running_task_count = int(row.get("running_task_count") or 0)
+    waiting_approval_count = int(row.get("waiting_approval_count") or 0)
     return {
         "conversation_id": str(row.get("conversation_id") or ""),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
         "last_user_message": last_user,
         "last_assistant_message": last_assistant,
+        "title": _conversation_title(str(row.get("title") or "") or None, history, last_user, last_assistant),
+        "preview": _conversation_preview(
+            last_assistant=last_assistant,
+            last_user=last_user,
+            running_task_count=running_task_count,
+            waiting_approval_count=waiting_approval_count,
+        ),
         "last_route": last_route,
         "task_count": int(row.get("task_count") or 0),
-        "running_task_count": int(row.get("running_task_count") or 0),
-        "waiting_approval_count": int(row.get("waiting_approval_count") or 0),
+        "running_task_count": running_task_count,
+        "waiting_approval_count": waiting_approval_count,
     }
 
 
@@ -108,7 +182,25 @@ def _task_kind_label(route: str) -> str:
         return "工具任务"
     if route == "direct_answer":
         return "直接回答"
-    return "长任务"
+    return "持续执行"
+
+
+def _chat_state(status: str, waiting_approval_count: int) -> str:
+    if waiting_approval_count > 0 or status == "WAITING_HUMAN":
+        return "等待确认"
+    if status in {"QUEUED", "VALIDATING", "PLANNING", "RUNNING", "WAITING_TOOL", "REVIEWING"}:
+        return "正在处理"
+    if status == "SUCCEEDED":
+        return "已完成"
+    if status == "FAILED_RETRYABLE":
+        return "可重试"
+    if status == "FAILED_FINAL":
+        return "失败"
+    if status == "TIMED_OUT":
+        return "已超时"
+    if status == "CANCELLED":
+        return "已取消"
+    return "处理中"
 
 
 def _progress_message(
@@ -119,21 +211,21 @@ def _progress_message(
     tool_call_count: int,
 ) -> tuple[str, str | None, str | None]:
     if waiting_approval_count > 0 or status == "WAITING_HUMAN":
-        return ("任务等待人工审批", "等待审批", "审批通过后系统会自动继续")
+        return ("这一步需要你确认后我再继续。", "等待你的确认", "确认后我会自动继续处理")
     if status == "WAITING_TOOL":
-        return ("任务正在等待工具结果", "等待工具执行", "工具返回后系统会继续")
+        return ("我已经发起工具调用，正在等结果回来。", "等待工具返回", "工具结果回来后我会继续")
     if status == "SUCCEEDED":
-        return ("任务已完成", None, "可查看回放和最终结果")
+        return ("这次处理已经完成。", None, "可以查看最终结果")
     if status in {"FAILED_RETRYABLE", "FAILED_FINAL"}:
-        return ("任务执行失败", None, "可查看失败原因并考虑重试")
+        return ("这次处理没有顺利完成。", None, "可以查看原因后重试")
     if status == "CANCELLED":
-        return ("任务已取消", None, None)
+        return ("这次处理已取消。", None, None)
     if status == "TIMED_OUT":
-        return ("任务执行超时", None, "可重试或调整任务规模")
+        return ("这次处理超时了。", None, "可以缩小范围后再试一次")
     current_step = _step_label(latest_step_key)
     if tool_call_count > 0:
-        return (f"系统正在执行，当前步骤：{current_step}", None, "可继续观察执行状态")
-    return (f"系统正在处理，当前步骤：{current_step}", None, "可继续观察执行状态")
+        return (f"我正在继续处理，当前步骤是“{current_step}”。", None, "你可以继续观察执行进展")
+    return (f"我正在处理这件事，当前步骤是“{current_step}”。", None, "你可以继续观察执行进展")
 
 
 def _failure_reason(task: dict[str, Any]) -> str | None:
@@ -142,13 +234,15 @@ def _failure_reason(task: dict[str, Any]) -> str | None:
         return None
     error_code = str(task.get("error_code") or "").strip()
     error_message = str(task.get("error_message") or "").strip()
+    if error_code in FAILURE_REASON_LABELS:
+        return FAILURE_REASON_LABELS[error_code]
     if error_code and error_message:
         return f"{error_code}: {error_message}"
     if error_code:
-        return error_code
+        return FAILURE_REASON_LABELS.get(error_code, error_code)
     if error_message:
         return error_message
-    return "unknown_error"
+    return FAILURE_REASON_LABELS["unknown_error"]
 
 
 def _result_preview(task: dict[str, Any]) -> str | None:
@@ -156,8 +250,30 @@ def _result_preview(task: dict[str, Any]) -> str | None:
     if output:
         return str(summarize_payload(output, max_len=220).get("summary") or "")
     if str(task.get("status") or "") == "SUCCEEDED":
-        return "任务已成功完成，可展开查看详情。"
+        return "这次处理已经完成，你可以展开查看详情。"
     return None
+
+
+def _assistant_summary(
+    *,
+    status: str,
+    progress_message: str,
+    waiting_for: str | None,
+    next_action: str | None,
+    failure_reason: str | None,
+    result_preview: str | None,
+) -> str:
+    if result_preview:
+        return _trim_text(result_preview, 140) or result_preview
+    if failure_reason:
+        return _trim_text(f"这次处理没有顺利完成：{failure_reason}", 140) or failure_reason
+    if waiting_for:
+        return _trim_text(f"{progress_message} 当前在{waiting_for}。", 140) or progress_message
+    if next_action:
+        return _trim_text(f"{progress_message} 下一步：{next_action}。", 140) or progress_message
+    if status in {"QUEUED", "VALIDATING", "PLANNING", "RUNNING", "WAITING_TOOL", "REVIEWING"}:
+        return _trim_text(progress_message, 140) or progress_message
+    return _trim_text(progress_message, 140) or progress_message
 
 
 def build_task_card(task: dict[str, Any]) -> dict[str, Any]:
@@ -172,6 +288,8 @@ def build_task_card(task: dict[str, Any]) -> dict[str, Any]:
         waiting_approval_count=waiting_approval_count,
         tool_call_count=tool_call_count,
     )
+    result_preview = _result_preview(task)
+    failure_reason = _failure_reason(task)
     return {
         "task_id": str(task.get("id") or task.get("task_id") or ""),
         "task_type": str(task.get("task_type") or ""),
@@ -188,8 +306,17 @@ def build_task_card(task: dict[str, Any]) -> dict[str, Any]:
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
         "trace_id": str(task.get("trace_id") or ""),
-        "result_preview": _result_preview(task),
-        "failure_reason": _failure_reason(task),
+        "result_preview": result_preview,
+        "failure_reason": failure_reason,
+        "chat_state": _chat_state(status, waiting_approval_count),
+        "assistant_summary": _assistant_summary(
+            status=status,
+            progress_message=progress_message,
+            waiting_for=waiting_for,
+            next_action=next_action,
+            failure_reason=failure_reason,
+            result_preview=result_preview,
+        ),
     }
 
 
@@ -220,9 +347,9 @@ def build_trace_tool_calls(tool_calls: list[dict[str, Any]], planner: dict[str, 
         tool_name = str(call.get("tool_id") or "")
         why = None
         if selected_tool and selected_tool == tool_name:
-            why = "规划器将该工具作为首选候选。"
+            why = "规划器把这个工具作为首选。"
         elif tool_name and tool_name in [str(x) for x in candidate_tools]:
-            why = "该工具命中规划器候选集合。"
+            why = "这个工具命中了规划器候选集合。"
         out.append(
             {
                 "tool_call_id": str(call.get("tool_call_id") or ""),
@@ -255,11 +382,11 @@ def build_trace_approvals(approvals: list[dict[str, Any]]) -> list[dict[str, Any
         status = str(item.get("status") or "")
         action_hint = None
         if status == "WAITING_HUMAN":
-            action_hint = "等待人工审批，审批通过后任务继续。"
+            action_hint = "现在在等人工确认，确认后任务会继续。"
         elif status in {"APPROVED", "EDITED"}:
-            action_hint = "审批已通过，任务可继续执行。"
+            action_hint = "确认已经通过，任务可以继续执行。"
         elif status == "REJECTED":
-            action_hint = "审批被拒绝，任务可能进入失败或终止状态。"
+            action_hint = "这次确认被拒绝了，任务可能会停止或失败。"
         out.append(
             {
                 "approval_id": str(item.get("id") or ""),
@@ -421,9 +548,9 @@ def build_task_trace_view(
         f"当前状态：{task_card.get('status_label')}",
     ]
     if task_card.get("waiting_for"):
-        summary_parts.append(f"阻塞原因：{task_card.get('waiting_for')}")
+        summary_parts.append(f"当前在等：{task_card.get('waiting_for')}")
     if retrieval_hits:
-        summary_parts.append(f"本次规划引用了 {len(retrieval_hits)} 条检索片段")
+        summary_parts.append(f"本次回答引用了 {len(retrieval_hits)} 条检索片段")
     if task_card.get("failure_reason"):
         summary_parts.append(f"失败原因：{task_card.get('failure_reason')}")
     task_summary = "；".join(summary_parts)
@@ -443,6 +570,9 @@ def build_task_trace_view(
     return {
         "task": task_card,
         "task_summary": task_summary,
+        "assistant_status": task_card.get("chat_state"),
+        "assistant_summary": task_card.get("assistant_summary") or task_card.get("progress_message"),
+        "next_step_hint": task_card.get("next_action"),
         "planner": planner,
         "retrieval_hits": retrieval_hits,
         "goal": goal,

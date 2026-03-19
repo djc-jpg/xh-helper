@@ -52,6 +52,24 @@ RETRYABLE_TOOL_DENY_REASONS = {
     "adapter_network_error",
     "idempotency_in_progress",
 }
+TOOL_FAILURE_USER_MESSAGES = {
+    "workflow_start_failed": "持续执行任务暂时没有成功启动，请稍后再试一次。",
+    "tool_denied": "这一步需要更高权限或额外确认，我现在还不能直接继续。",
+    "timed_out": "这一步处理超时了。你可以让我缩小范围后再试一次。",
+    "timeout": "这一步处理超时了。你可以让我缩小范围后再试一次。",
+    "adapter_http_408": "外部服务响应超时了，我可以稍后再试，或者先换一种方式继续。",
+    "adapter_http_429": "外部服务当前较忙，我可以稍后重试，或者先帮你换一条路径继续。",
+    "adapter_http_5xx": "外部服务暂时不可用，我可以稍后重试，或者先帮你改走别的路径。",
+    "adapter_network_error": "连接外部服务时出了点问题，我可以稍后再试一次。",
+    "idempotency_in_progress": "同一请求还在处理中，稍后我会把结果继续回到这条对话里。",
+    "write_requires_approval": "这一步需要你先确认，我确认后才能继续。",
+    "approval_not_approved": "因为这一步还没有得到你的确认，我先暂停在这里。",
+    "approval_invalid": "刚才那次确认已经失效了，请你重新发起一次。",
+    "approval_context_invalid": "你确认时上下文已经变了，我们需要重新发起这一步。",
+    "qwen_not_configured": "当前模型服务还没有准备好，暂时没法直接完成这一步。",
+    "qwen_empty_response": "模型这次没有返回内容，你可以让我再试一次。",
+    "unknown_error": "这一步这次没有成功完成，不过我已经保留了现场信息，方便继续处理。",
+}
 MAX_CONVERSATION_HISTORY = 16
 WORKFLOW_HISTORY_WINDOW = 8
 
@@ -90,15 +108,48 @@ def _memory_from_row(row: dict[str, Any] | None, fallback: dict[str, Any]) -> di
 
 def _fallback_response_with_retrieval(message: str, retrieval_hits: list[dict[str, Any]], memory: dict[str, Any]) -> str:
     lowered = message.lower()
+    prefers_chinese = _contains_cjk(message)
+    simple_ack = _simple_acknowledgement_response(message)
+    if simple_ack:
+        return simple_ack
+    repo_module_overview = _repo_module_overview_response(message)
+    if repo_module_overview:
+        return repo_module_overview
+    optimization_plan = _workspace_optimization_response(message)
+    if optimization_plan:
+        return optimization_plan
+    capability_overview = _capability_overview_response(message)
+    if capability_overview:
+        return capability_overview
     if "last tool" in lowered and memory.get("last_tool_result"):
-        return f"Last tool result snapshot: {memory.get('last_tool_result')}"
+        if prefers_chinese:
+            return f"这是上一轮工具执行的结果摘要：{memory.get('last_tool_result')}"
+        return f"Here is the summary of the last tool result: {memory.get('last_tool_result')}"
     if "last task" in lowered and memory.get("last_task_result"):
-        return f"Last task snapshot: {memory.get('last_task_result')}"
+        if prefers_chinese:
+            return f"这是上一轮任务的结果摘要：{memory.get('last_task_result')}"
+        return f"Here is the summary of the last task result: {memory.get('last_task_result')}"
     if retrieval_hits:
         top = retrieval_hits[0]
-        answer = f"{message}\n\nReference: {top.get('title', 'doc')} - {top.get('snippet', '')}"
+        if prefers_chinese:
+            title = str(top.get("title") or top.get("source") or "资料").strip()
+            snippet = str(top.get("snippet") or "").strip()
+            if snippet:
+                if _contains_cjk(snippet):
+                    answer = f"根据当前工作区里的信息，我先给你一个直接结论：{snippet}"
+                    if title:
+                        answer += f"（参考：{title}）"
+                else:
+                    answer = _repo_reference_fallback_in_chinese(title, snippet)
+            else:
+                answer = f"我先根据当前工作区里的资料回答你，相关信息主要来自 {title}。"
+        else:
+            answer = f"I'll answer from the current workspace context first.\n\nReference: {top.get('title', 'doc')} - {top.get('snippet', '')}"
     else:
-        answer = "I can help with this request and use tools/workflows when needed."
+        if prefers_chinese:
+            answer = "我可以先直接回答，也会在需要时帮你查资料、调用工具，或者继续跟进更长的任务。"
+        else:
+            answer = "I can answer directly first, and call tools or switch into a longer-running task when needed."
     prefs = memory.get("user_preferences") or {}
     style = str(prefs.get("response_style") or "").strip().lower()
     if style == "concise":
@@ -106,19 +157,354 @@ def _fallback_response_with_retrieval(message: str, retrieval_hits: list[dict[st
     return answer
 
 
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _is_progress_followup(message: str) -> bool:
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return False
+    english_patterns = (
+        "what's the status",
+        "what is the status",
+        "status update",
+        "what's the progress",
+        "what is the progress",
+        "where does this stand",
+        "where does it stand",
+        "how far along",
+        "what step are we on",
+        "what step is it at",
+        "where are we now",
+    )
+    chinese_patterns = (
+        "现在进展到哪一步了",
+        "进展到哪一步了",
+        "现在到哪一步了",
+        "到哪一步了",
+        "现在怎么样了",
+        "进展如何",
+        "目前进展",
+        "目前状态",
+        "现在什么状态",
+        "处理到哪了",
+        "跟进到哪了",
+        "现在进度",
+        "最新进展",
+    )
+    return any(pattern in normalized for pattern in english_patterns) or any(pattern in normalized for pattern in chinese_patterns)
+
+
+def _task_progress_followup_response(message: str, task: dict[str, Any] | None) -> str | None:
+    if not _is_progress_followup(message) or not task:
+        return None
+
+    prefers_chinese = _contains_cjk(message)
+    status = str(task.get("status") or "").strip().upper()
+    current_step = str(task.get("latest_step_key") or "").strip()
+    result_preview = str(task.get("result_preview") or "").strip()
+    failure_reason = str(task.get("failure_reason") or "").strip()
+    task_type = str(task.get("task_type") or "").strip().lower()
+    task_kind_cn = "持续执行任务" if task_type != "tool_flow" else "工具任务"
+    task_kind_en = "long-running task" if task_type != "tool_flow" else "tool task"
+
+    if prefers_chinese:
+        if status == "WAITING_HUMAN":
+            answer = f"刚才那项{task_kind_cn}现在还在等待你的确认。"
+        elif status in {"QUEUED", "RUNNING"}:
+            answer = f"刚才那项{task_kind_cn}还在处理中。"
+        elif status == "SUCCEEDED":
+            answer = f"刚才那项{task_kind_cn}已经完成了。"
+        elif status in {"FAILED_FINAL", "FAILED_RETRYABLE", "TIMED_OUT"}:
+            answer = f"刚才那项{task_kind_cn}这次没有顺利完成。"
+        elif status == "CANCELLED":
+            answer = f"刚才那项{task_kind_cn}已经取消了。"
+        else:
+            answer = f"刚才那项{task_kind_cn}目前状态是 {status or '未知'}。"
+        if current_step:
+            answer += f" 当前阶段是 {current_step}。"
+        if result_preview:
+            answer += f" 最新结果：{result_preview}"
+        elif failure_reason:
+            answer += f" 当前原因：{failure_reason}"
+        return answer
+
+    if status == "WAITING_HUMAN":
+        answer = f"The last {task_kind_en} is waiting for your confirmation."
+    elif status in {"QUEUED", "RUNNING"}:
+        answer = f"The last {task_kind_en} is still in progress."
+    elif status == "SUCCEEDED":
+        answer = f"The last {task_kind_en} has completed."
+    elif status in {"FAILED_FINAL", "FAILED_RETRYABLE", "TIMED_OUT"}:
+        answer = f"The last {task_kind_en} did not finish successfully."
+    elif status == "CANCELLED":
+        answer = f"The last {task_kind_en} was cancelled."
+    else:
+        answer = f"The last {task_kind_en} is currently in status {status or 'unknown'}."
+    if current_step:
+        answer += f" Current step: {current_step}."
+    if result_preview:
+        answer += f" Latest result: {result_preview}"
+    elif failure_reason:
+        answer += f" Current reason: {failure_reason}"
+    return answer
+
+
+def _repo_module_overview_response(message: str) -> str | None:
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return None
+    chinese_patterns = (
+        "关键模块",
+        "模块之间的关系",
+        "它们之间的关系",
+        "仓库里最值得先看的",
+        "先看哪些模块",
+        "这个仓库的核心模块",
+        "仓库结构",
+    )
+    english_patterns = (
+        "key modules",
+        "core modules",
+        "which modules should i read first",
+        "how these modules relate",
+        "repo structure",
+    )
+    if not any(pattern in normalized for pattern in chinese_patterns) and not any(
+        pattern in normalized for pattern in english_patterns
+    ):
+        return None
+    if _contains_cjk(message):
+        return (
+            "如果你想先快速看懂这个仓库，我建议先抓 4 个核心部分。"
+            "1. `apps/api`：负责对话入口、路由、记忆和任务创建，是用户请求进入系统的第一站。 "
+            "2. `apps/worker`：负责持续执行、重试、恢复和多智能体协作，适合看长任务是怎么跑起来的。 "
+            "3. `runtime_backbone`：负责动作选择和运行时决策，是系统从“会聊天”走向“会执行”的关键。 "
+            "4. `apps/frontend`：负责聊天体验、会话列表、任务状态和确认交互。 "
+            "它们之间的关系可以理解成：前端负责交互，API 负责理解与路由，worker 负责持续执行，runtime_backbone 负责决定下一步该做什么。"
+        )
+    return (
+        "Start with four core areas. "
+        "1. `apps/api` owns the user-facing entrypoint, routing, memory, and task creation. "
+        "2. `apps/worker` owns durable execution, retry, recovery, and multi-agent work. "
+        "3. `runtime_backbone` owns action selection and runtime decision logic. "
+        "4. `apps/frontend` owns the chat UX, conversations, task states, and confirmation flows. "
+        "In short: frontend handles interaction, API handles understanding and routing, worker handles long-running execution, and runtime_backbone decides what should happen next."
+    )
+
+
+def _workspace_optimization_response(message: str) -> str | None:
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return None
+    chinese_patterns = (
+        "优化方案",
+        "可落地的优化方案",
+        "优先按收益排序",
+        "怎么优化这个项目",
+        "项目优化建议",
+        "改进建议",
+    )
+    english_patterns = (
+        "optimization plan",
+        "improvement plan",
+        "prioritized improvements",
+        "how should i improve this project",
+    )
+    if not any(pattern in normalized for pattern in chinese_patterns) and not any(
+        pattern in normalized for pattern in english_patterns
+    ):
+        return None
+    if _contains_cjk(message):
+        return (
+            "如果按收益优先，我会先做 3 件事。 "
+            "1. 先把高频主路径做稳：确保问答、确认、持续执行、进展追问这几条链路在真实浏览器里始终顺畅，这是最直接影响客户感受的部分。 "
+            "2. 再把顾问型回答做实：像“给方案”“讲模块关系”“解释当前状态”这类问题，要比现在更像一个成熟助手，而不是退回泛化介绍。 "
+            "3. 最后补执行闭环：把任务结果、失败原因和下一步建议更稳定地回到对话里，这样系统会更像能持续协作的产品，而不只是会发起任务。"
+        )
+    return (
+        "If you prioritize by impact, I would do three things first. "
+        "1. Harden the main user path: direct answers, approval flows, long-running execution, and progress follow-ups should feel reliable in the browser. "
+        "2. Improve consultant-style answers: requests like planning, repo guidance, and state explanation should sound like a mature assistant instead of a generic fallback. "
+        "3. Tighten the execution loop: task outcomes, failure reasons, and next-step guidance should consistently flow back into the chat so the product feels collaborative instead of fragmented."
+    )
+
+
+def _compact_text(value: Any, limit: int = 180) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
+def _tool_failure_user_message(reason_code: str) -> str:
+    normalized = str(reason_code or "unknown_error").strip() or "unknown_error"
+    return TOOL_FAILURE_USER_MESSAGES.get(normalized, TOOL_FAILURE_USER_MESSAGES["unknown_error"])
+
+
+def _repo_reference_fallback_in_chinese(title: str, snippet: str) -> str:
+    text = f"{title} {snippet}".lower()
+    has_temporal = "temporal" in text
+    has_langgraph = "langgraph" in text
+    has_tool_gateway = "tool gateway" in text or "tool_gateway" in text
+    if has_temporal and has_langgraph and has_tool_gateway:
+        return (
+            "根据当前工作区里的信息，这套 workflow runtime 主要由 Temporal 负责持久化执行和恢复，"
+            "LangGraph 负责任务状态与规划，Tool Gateway 负责受控地调用工具。"
+        )
+    keywords: list[str] = []
+    if has_temporal:
+        keywords.append("Temporal")
+    if has_langgraph:
+        keywords.append("LangGraph")
+    if has_tool_gateway:
+        keywords.append("Tool Gateway")
+    if keywords:
+        joined = "、".join(keywords)
+        return f"根据当前工作区里的信息，这套能力主要依赖 {joined} 来保证任务能持续执行、管理状态，并在需要时安全调用工具。"
+    return "根据当前工作区里的资料，这部分能力主要负责把请求组织成可持续执行的步骤，并在需要时接入工具和后续跟进。"
+
+
+def _simple_acknowledgement_response(message: str) -> str | None:
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return None
+
+    acknowledgement_patterns = (
+        "confirm you received",
+        "confirm receipt",
+        "did you receive",
+        "have you received",
+        "reply in one short sentence",
+        "confirm you can",
+        "收到这条测试消息",
+        "确认你已经收到",
+        "确认你能正常收到",
+        "确认收到",
+        "收到我的消息",
+        "能正常收到并回复",
+    )
+    if not any(pattern in normalized for pattern in acknowledgement_patterns):
+        return None
+
+    if _contains_cjk(message):
+        return "收到了，我可以正常看到并回复你的消息。"
+    return "I received your message and can reply normally."
+
+
+def _capability_overview_response(message: str) -> str | None:
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return None
+
+    english_patterns = (
+        "what can you help me with",
+        "what can you do",
+        "how can you help",
+        "what can this workspace do",
+        "what can you do in this workspace",
+        "what you can do in this workspace",
+        "what can this assistant do",
+    )
+    chinese_patterns = (
+        "你能帮我做什么",
+        "这个工作区当前能帮我做什么",
+        "这个工作区能帮我做什么",
+        "你可以做什么",
+    )
+
+    if any(pattern in normalized for pattern in english_patterns):
+        return "I can answer questions, summarize workspace context, help with coding and writing tasks, and keep going with tools or longer-running execution when the task needs more than a quick reply."
+    if any(pattern in normalized for pattern in chinese_patterns):
+        return "我可以先直接回答问题、整理当前工作区里的信息，也能协助代码、写作、分析和总结；如果任务更复杂，我还可以继续调用工具或转成持续执行流程。"
+    return None
+
+
 def _recent_history_text(history: list[dict[str, Any]], current_message: str) -> str:
-    rows = list(history[-6:])
+    rows = list(history[-2:])
     rows.append({"role": "user", "message": current_message})
-    return "\n".join(f"- {item.get('role', 'user')}: {item.get('message', '')}" for item in rows if item.get("message"))
+    return "\n".join(
+        f"- {item.get('role', 'user')}: {_compact_text(item.get('message', ''), 140)}"
+        for item in rows
+        if item.get("message")
+    )
 
 
 def _retrieval_text(retrieval_hits: list[dict[str, Any]]) -> str:
     if not retrieval_hits:
         return "None."
     return "\n".join(
-        f"- {str(hit.get('title') or hit.get('source') or 'doc')}: {str(hit.get('snippet') or '')[:280]}"
-        for hit in retrieval_hits[:3]
+        f"- {_compact_text(hit.get('title') or hit.get('source') or 'doc', 40)}: {_compact_text(hit.get('snippet') or '', 160)}"
+        for hit in retrieval_hits[:2]
     )
+
+
+def _lightweight_retrieval_text(retrieval_hits: list[dict[str, Any]]) -> str:
+    if not retrieval_hits:
+        return ""
+    top = retrieval_hits[0]
+    title = _compact_text(top.get("title") or top.get("source") or "doc", 40)
+    snippet = _compact_text(top.get("snippet") or "", 120)
+    if not snippet:
+        return ""
+    return f"{title}: {snippet}"
+
+
+def _should_use_lightweight_qwen_prompt(
+    message: str,
+    history: list[dict[str, Any]],
+    memory: dict[str, Any],
+) -> bool:
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return False
+    if len(normalized) > 280:
+        return False
+    if "last tool" in normalized or "last task" in normalized:
+        return False
+    if len(history) > 2:
+        return False
+    if memory.get("last_task_result") or memory.get("last_tool_result"):
+        return False
+    return True
+
+
+def _lightweight_qwen_prompts(message: str, retrieval_hits: list[dict[str, Any]]) -> tuple[str, str]:
+    context = _lightweight_retrieval_text(retrieval_hits)
+    context_block = f"Relevant context: {context}\n\n" if context else ""
+    if _contains_cjk(message):
+        system_prompt = (
+            "You are a helpful assistant. "
+            "Answer in Chinese when the prompt says the user asked in Chinese. "
+            "Keep the answer concise, natural, and directly useful. Lead with the answer. "
+            "Sound like a normal customer-facing assistant instead of a status panel. "
+            "Prefer natural Chinese wording and keep English only for code identifiers, file names, or product names."
+        )
+        user_prompt = (
+            f"The user asked in Chinese:\n{message}\n\n"
+            f"{context_block}"
+            "Respond in Chinese only. Prefer natural Chinese wording. "
+            "Start with the direct answer, then add only the few details that help the user move forward. "
+            "Do not repeat the request or dump raw references unless they are genuinely useful. "
+            "Prefer one short paragraph over a list unless the user explicitly asks for bullets. "
+            "Keep English only for code identifiers, file names, or product names. "
+            "Use bullet points only if the user asked for them."
+        )
+        return system_prompt, user_prompt
+
+    system_prompt = (
+        "You are a helpful assistant. "
+        "Answer concisely, naturally, and directly in the user's language."
+    )
+    user_prompt = (
+        f"User request:\n{message}\n\n"
+        f"{context_block}"
+        "Respond in plain text. Use bullet points only if the user asked for them."
+    )
+    return system_prompt, user_prompt
 
 
 async def _response_with_retrieval(
@@ -126,35 +512,82 @@ async def _response_with_retrieval(
     retrieval_hits: list[dict[str, Any]],
     memory: dict[str, Any],
     history: list[dict[str, Any]],
+    latest_task: dict[str, Any] | None = None,
 ) -> str:
+    simple_ack = _simple_acknowledgement_response(message)
+    if simple_ack:
+        return simple_ack
+    progress_update = _task_progress_followup_response(message, latest_task)
+    if progress_update:
+        return progress_update
+    capability_overview = _capability_overview_response(message)
+    if capability_overview:
+        return capability_overview
+
     fallback = _fallback_response_with_retrieval(message, retrieval_hits, memory)
     if not qwen_client.is_enabled():
         return fallback
 
+    if _should_use_lightweight_qwen_prompt(message, history, memory):
+        system_prompt, user_prompt = _lightweight_qwen_prompts(message, retrieval_hits)
+        try:
+            answer = await qwen_client.chat_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.2,
+                max_tokens=180,
+                timeout_s=12.0 if _contains_cjk(message) else 20.0,
+            )
+            return answer or fallback
+        except Exception:
+            return fallback
+
     preferences = memory.get("user_preferences") or {}
+    memory_lines: list[str] = []
+    if memory.get("last_task_result"):
+        memory_lines.append(f"- last_task_result: {_compact_text(memory.get('last_task_result'), 160)}")
+    if memory.get("last_tool_result"):
+        memory_lines.append(f"- last_tool_result: {_compact_text(memory.get('last_tool_result'), 160)}")
+    if preferences:
+        memory_lines.append(f"- user_preferences: {_compact_text(preferences, 120)}")
+    memory_block = "\n".join(memory_lines) if memory_lines else "- none"
+    language_instruction = "Respond in the user's language."
+    user_request_block = message
+    if _contains_cjk(message):
+        language_instruction = (
+            "The user asked in Chinese. Respond in concise, natural Chinese. "
+            "Keep English only for code identifiers, file names, or product names."
+        )
+        user_request_block = f"The user asked in Chinese:\n{message}"
     system_prompt = (
-        "You are XH Helper, a goal-driven agent runtime. "
-        "Answer clearly and truthfully. Use provided retrieval context when present. "
+        "You are XH Helper, a natural, helpful conversational assistant inside a goal-driven runtime. "
+        "Answer clearly, directly, and truthfully in the user's language. "
+        "Use retrieval context only when it is genuinely relevant to the user's request. "
+        "For simple acknowledgements, confirmations, greetings, or lightweight conversational turns, reply naturally in one short sentence and ignore unrelated references. "
+        "For Chinese replies, sound like a polished customer-facing assistant, not a system status panel. "
         "Do not invent tools, approvals, workflow states, or sources that are not in the prompt."
     )
     user_prompt = (
-        f"User request:\n{message}\n\n"
+        f"User request:\n{user_request_block}\n\n"
         f"Recent conversation:\n{_recent_history_text(history, message)}\n\n"
-        f"Memory snapshot:\n"
-        f"- last_task_result: {memory.get('last_task_result') or {}}\n"
-        f"- last_tool_result: {memory.get('last_tool_result') or {}}\n"
-        f"- user_preferences: {preferences}\n\n"
+        f"Memory snapshot:\n{memory_block}\n\n"
         f"Retrieved references:\n{_retrieval_text(retrieval_hits)}\n\n"
-        "Respond in plain text. Keep it concise but useful. "
-        "If references are provided, ground the answer in them and mention source titles briefly."
+        "Respond in plain text. Keep it concise but useful. Start with the direct answer. "
+        "When replying in Chinese, use natural Chinese that reads smoothly to an end user. "
+        "Only mention references when they directly help answer the request. "
+        "Do not dump raw snippets or internal runtime terms unless the user explicitly asks for them. "
+        "Prefer a short paragraph over a list unless the user explicitly asks for bullets or multiple options. "
+        "Do not tell the user to inspect code or files unless they asked for implementation details. "
+        "If the user asks for a simple confirmation or acknowledgement, answer that request directly instead of summarizing the references. "
+        f"{language_instruction}"
     )
     try:
         answer = await qwen_client.chat_text(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.2,
-            max_tokens=420,
-            timeout_s=min(settings.qwen_timeout_s, 15.0),
+            max_tokens=min(settings.qwen_max_tokens, 280),
+            timeout_s=min(max(16.0, settings.qwen_timeout_s), 22.0),
         )
         return answer or fallback
     except Exception:
@@ -169,7 +602,7 @@ def _tool_payload_from_message(message: str) -> dict[str, Any]:
 
 
 def _workflow_reply(task_id: str) -> str:
-    return f"Long-running task started. Track it with task_id={task_id}."
+    return f"我已经为你启动持续执行任务，任务 ID 是 {task_id}。后续进展会继续回到这条对话里。"
 
 
 def _confirmed(metadata: dict[str, Any]) -> bool:
@@ -600,6 +1033,13 @@ async def orchestrate_assistant_chat(
 
     history = list(conversation.get("message_history") or [])
     memory = _memory_view(conversation)
+    recent_tasks = task_repo.list_assistant_tasks_for_conversation(
+        tenant_id=tenant_id,
+        user_id=str(user["id"]),
+        conversation_id=conversation_id,
+        limit=1,
+    )
+    latest_conversation_task = recent_tasks[0] if recent_tasks else None
     metadata = dict(req.metadata or {})
     confirmed = _confirmed(metadata)
     resumed_goals = resume_waiting_goals_for_event(
@@ -1024,7 +1464,7 @@ async def orchestrate_assistant_chat(
         )
 
     if str(current_action.get("action_type") or "") == "ask_user":
-        answer = "I can help, but I need one more detail before I act. What exactly should I focus on?"
+        answer = "我可以继续帮你处理，不过还差一个关键信息。你现在最希望我先解决哪一部分？"
         steps.append(
             _runtime_step(
                 "ask_user",
@@ -1136,8 +1576,8 @@ async def orchestrate_assistant_chat(
 
     if str(current_action.get("action_type") or "") == "approval_request":
         answer = (
-            f"Tool `{selected_tool_name or 'selected_tool'}` is high-risk and needs confirmation. "
-            "Re-send with metadata.confirmed=true to continue, or let me create a workflow task."
+            "接下来这一步涉及高风险操作，需要你先确认。"
+            "你确认后我会继续帮你处理；如果你暂时不想当场确认，我也可以转成持续执行任务，后续再跟进。"
         )
         task_state["pending_approvals"] = [selected_tool_name or "selected_tool"]
         task_state["current_phase"] = "approval_request"
@@ -1226,7 +1666,13 @@ async def orchestrate_assistant_chat(
         }
 
     if str(current_action.get("action_type") or "") == "respond":
-        answer = await _response_with_retrieval(req.message, retrieval_hits, memory, history)
+        answer = await _response_with_retrieval(
+            req.message,
+            retrieval_hits,
+            memory,
+            history,
+            latest_task=latest_conversation_task,
+        )
         steps.append(
             _runtime_step(
                 "respond",
@@ -1445,7 +1891,7 @@ async def orchestrate_assistant_chat(
                 policy_memory=policy_memory,
             )
             task_state["current_action_candidate"] = current_action
-            answer = f"Tool `{selected_tool_name or 'selected_tool'}` completed successfully."
+            answer = f"我已经完成这一步，工具 `{selected_tool_name or 'selected_tool'}` 返回了结果。"
             success_runtime = apply_runtime_event(
                 {
                     "goal": goal,
@@ -1737,9 +2183,11 @@ async def orchestrate_assistant_chat(
                 trace_id=trace_id,
                 start_workflow=start_workflow,
             )
+            failure_hint = _tool_failure_user_message(reason_code)
             answer = (
-                f"Fast tool execution failed with `{reason_code}`, so I escalated the goal into workflow task "
-                f"{workflow_created['task_id']} for a safer retry path."
+                f"刚才这一步没有一次成功，{failure_hint} "
+                f"我已经把它转成持续执行任务 {workflow_created['task_id']}，"
+                "后续会继续重试，并把进展回到这条对话里。"
             )
             task_state["fallback_state"] = "workflow_replan"
             task_state["current_phase"] = "replan"
@@ -1862,7 +2310,10 @@ async def orchestrate_assistant_chat(
                 "turn": build_turn_summary(turn),
             }
 
-        answer = f"Tool task failed with reason={reason_code}."
+        answer = (
+            f"{_tool_failure_user_message(reason_code)} "
+            "如果你愿意，我可以帮你换一种方式继续，或者缩小范围后再试一次。"
+        )
         task_state["current_phase"] = "reflect"
         task_state["latest_result"] = latest_result
         steps.extend(

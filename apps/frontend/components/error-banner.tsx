@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { ApiError } from "../lib/api";
+import { ApiError, getDisplayErrorMessage } from "../lib/api";
 
 interface ErrorBannerProps {
   message?: string;
@@ -34,9 +34,7 @@ export function ErrorBanner({ message, error, onRetry }: ErrorBannerProps) {
   const apiError = asApiError(error);
   const text = useMemo(() => {
     if (message) return message;
-    if (apiError) return apiError.detail;
-    if (error instanceof Error) return error.message;
-    return "请求失败，请稍后重试。";
+    return getDisplayErrorMessage(apiError || error);
   }, [apiError, error, message]);
 
   const copyRequestId = async () => {

@@ -16,14 +16,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (!auth.isAuthenticated) {
     return (
       <div className="panel stack-gap-md">
-        <h2 className="page-title">需要登录</h2>
-        <p className="muted-text">{auth.sessionHint || "当前会话未登录。请先登录再使用 MAS 控制台功能。"}</p>
+        <h2 className="page-title">请先登录</h2>
+        <p className="muted-text">{auth.sessionHint || "登录后就可以继续对话、查看任务进展，并处理需要确认的操作。"}</p>
         <div className="inline-actions">
           <Link href="/login" className="btn btn-primary">
-            前往登录
+            去登录
           </Link>
           <Link href="/register" className="btn btn-ghost">
-            注册账号
+            创建账号
           </Link>
         </div>
       </div>

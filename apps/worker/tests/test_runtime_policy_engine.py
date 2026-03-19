@@ -65,6 +65,69 @@ class RuntimePolicyEngineTests(unittest.TestCase):
         self.assertEqual("workflow_call", policy["selected_action"])
         self.assertIn("durable workflow path", action["rationale"])
 
+    def test_choose_next_action_keeps_explanatory_question_in_answer_path(self) -> None:
+        action, policy = choose_next_action(
+            goal={
+                "normalized_goal": "How does the workflow runtime work in this repo?",
+                "unknowns": [],
+                "risk_level": "low",
+            },
+            planner={
+                "action": "use_retrieval",
+                "intent": "general_qna",
+                "policy_signals": {
+                    "action_signal": "retrieve",
+                    "action_affinities": {"retrieve": 0.8, "workflow_call": 0.2},
+                },
+            },
+            task_state={"available_actions": ["retrieve", "respond", "workflow_call"]},
+            retrieval_hits=[{"title": "runtime", "snippet": "..."}],
+            tool_candidates=[],
+            confirmed=False,
+            episodes=[
+                {
+                    "episode_id": "ep-workflow",
+                    "chosen_strategy": "workflow_call",
+                    "outcome_status": "SUCCEEDED",
+                }
+            ],
+            has_retrieval_observation=True,
+            latest_result=None,
+            requested_mode="auto",
+        )
+
+        self.assertEqual("respond", action["action_type"])
+        self.assertEqual("respond", policy["selected_action"])
+        self.assertIn("explanatory question", action["rationale"])
+
+    def test_choose_next_action_keeps_chinese_explanatory_question_in_answer_path(self) -> None:
+        action, policy = choose_next_action(
+            goal={
+                "normalized_goal": "这个 workflow runtime 是怎么工作的？",
+                "unknowns": [],
+                "risk_level": "low",
+            },
+            planner={
+                "action": "use_retrieval",
+                "intent": "general_qna",
+                "policy_signals": {
+                    "action_signal": "retrieve",
+                    "action_affinities": {"retrieve": 0.8, "workflow_call": 0.2},
+                },
+            },
+            task_state={"available_actions": ["retrieve", "respond", "workflow_call"]},
+            retrieval_hits=[{"title": "runtime", "snippet": "..."}],
+            tool_candidates=[],
+            confirmed=False,
+            episodes=[],
+            has_retrieval_observation=True,
+            latest_result=None,
+            requested_mode="auto",
+        )
+
+        self.assertEqual("respond", action["action_type"])
+        self.assertEqual("respond", policy["selected_action"])
+
     def test_runtime_requires_approval_for_pending_tool_plan(self) -> None:
         requires_hitl = runtime_requires_approval(
             task_type="research_summary",

@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { ErrorBanner } from "../../components/error-banner";
 import { useAuth } from "../../lib/auth-context";
-import { ApiError } from "../../lib/api";
+import { getDisplayErrorMessage } from "../../lib/api";
 import { AuthStorageMode } from "../../lib/mas-types";
 
 const schema = z
@@ -46,7 +46,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (auth.ready && auth.isAuthenticated) {
-      router.replace("/runs");
+      router.replace("/assistant");
     }
   }, [auth.isAuthenticated, auth.ready, router]);
 
@@ -59,18 +59,17 @@ export default function RegisterPage() {
         password: values.password,
         modeOverride: override
       });
-      router.replace("/runs");
+      router.replace("/assistant");
     } catch (error) {
-      const message = error instanceof ApiError ? error.detail : error instanceof Error ? error.message : "注册失败";
-      setError("root", { message });
+      setError("root", { message: getDisplayErrorMessage(error) });
     }
   });
 
   return (
     <div className="panel stack-gap-md">
       <div className="stack-gap-xs">
-        <h2 className="page-title">创建控制台账号</h2>
-        <p className="page-subtitle">注册后将自动登录并进入 MAS 闭环运行页。</p>
+        <h2 className="page-title">创建你的账号</h2>
+        <p className="page-subtitle">注册后会自动登录，你就可以直接开始对话和发起任务。</p>
       </div>
 
       <form className="stack-gap-sm" onSubmit={onSubmit}>
@@ -97,7 +96,7 @@ export default function RegisterPage() {
           <select id="rememberMode" {...register("rememberMode")} disabled={!auth.canOverrideMode}>
             <option value="default">使用系统默认</option>
             <option value="sessionStorage">sessionStorage</option>
-            <option value="localStorage">localStorage（仅受信设备）</option>
+            <option value="localStorage">localStorage（仅自己的设备）</option>
           </select>
         </div>
 

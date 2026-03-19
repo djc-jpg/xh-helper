@@ -1,8 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, requestJson, setUnauthorizedHandler } from "../lib/api";
+import { ApiError, humanizeErrorDetail, requestJson, resolveApiBase, setUnauthorizedHandler } from "../lib/api";
+
+describe("api base resolution", () => {
+  it("uses the current browser host when no explicit api base is configured", () => {
+    expect(resolveApiBase()).toBe("http://localhost:18000");
+  });
+});
 
 describe("api 401 interceptor", () => {
+  it("maps backend detail codes into user-friendly copy", () => {
+    expect(humanizeErrorDetail("assistant_stream_failed")).toBe("这次回复在生成途中中断了，请稍后再试。");
+    expect(humanizeErrorDetail("missing_token")).toBe("登录状态已失效，请重新登录。");
+    expect(humanizeErrorDetail("backend_unreachable")).toBe("服务暂时不可用，请稍后再试。");
+  });
+
   it("calls unauthorized handler and throws ApiError on 401", async () => {
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
@@ -85,5 +97,22 @@ describe("api 401 interceptor", () => {
     expect(handler).not.toHaveBeenCalled();
     vi.restoreAllMocks();
     setUnauthorizedHandler(null);
+  });
+
+  it("maps network failures into a service unavailable error", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+    await expect(
+      requestJson("/auth/login", {
+        method: "POST",
+        allowAnonymous: true,
+        body: { email: "owner@example.com", password: "password" }
+      })
+    ).rejects.toMatchObject({
+      status: 0,
+      detail: "backend_unreachable"
+    });
+
+    vi.restoreAllMocks();
   });
 });

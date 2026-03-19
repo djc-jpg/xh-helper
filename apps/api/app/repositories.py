@@ -76,6 +76,15 @@ def _truncate_text(value: str, max_len: int = ERROR_MESSAGE_MAX_LEN) -> str:
     return txt[: max_len - 3] + "..."
 
 
+def _conversation_title_seed(message: str, max_len: int = 80) -> str | None:
+    collapsed = " ".join(str(message or "").split())
+    if not collapsed:
+        return None
+    if len(collapsed) <= max_len:
+        return collapsed
+    return collapsed[: max_len - 3] + "..."
+
+
 def _redact_sensitive_text(value: str) -> str:
     txt = value
     for pattern in _SENSITIVE_TEXT_PATTERNS:
@@ -1224,6 +1233,7 @@ class AssistantConversationRepository:
               c.conversation_id,
               c.tenant_id,
               c.user_id,
+              c.title,
               c.message_history,
               c.last_task_result,
               c.last_tool_result,
@@ -1269,7 +1279,7 @@ class AssistantConversationRepository:
         return fetchone(
             """
             SELECT
-              conversation_id, tenant_id, user_id, message_history,
+              conversation_id, tenant_id, user_id, title, message_history,
               last_task_result, last_tool_result, user_preferences,
               created_at, updated_at
             FROM assistant_conversations
@@ -1290,7 +1300,7 @@ class AssistantConversationRepository:
             cur.execute(
                 """
                 SELECT
-                  conversation_id, tenant_id, user_id, message_history,
+                  conversation_id, tenant_id, user_id, title, message_history,
                   last_task_result, last_tool_result, user_preferences,
                   created_at, updated_at
                 FROM assistant_conversations
@@ -1308,13 +1318,13 @@ class AssistantConversationRepository:
             cur.execute(
                 """
                 INSERT INTO assistant_conversations (
-                  conversation_id, tenant_id, user_id, message_history,
+                  conversation_id, tenant_id, user_id, title, message_history,
                   last_task_result, last_tool_result, user_preferences,
                   created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 RETURNING
-                  conversation_id, tenant_id, user_id, message_history,
+                  conversation_id, tenant_id, user_id, title, message_history,
                   last_task_result, last_tool_result, user_preferences,
                   created_at, updated_at
                 """,
@@ -1322,6 +1332,7 @@ class AssistantConversationRepository:
                     conversation_id,
                     tenant_id,
                     user_id,
+                    None,
                     Jsonb([]),
                     Jsonb({}),
                     Jsonb({}),
@@ -1348,7 +1359,7 @@ class AssistantConversationRepository:
         with transaction_cursor() as cur:
             cur.execute(
                 """
-                SELECT user_id, message_history
+                SELECT user_id, title, message_history
                 FROM assistant_conversations
                 WHERE tenant_id = %s
                   AND conversation_id = %s
@@ -1363,6 +1374,7 @@ class AssistantConversationRepository:
                 raise PermissionError("conversation ownership mismatch")
 
             history = list(row.get("message_history") or [])
+            next_title = str(row.get("title") or "").strip() or None
             item: dict[str, Any] = {
                 "role": role,
                 "message": message,
@@ -1371,6 +1383,10 @@ class AssistantConversationRepository:
             }
             if metadata:
                 item["metadata"] = mask_payload(metadata)
+            if role == "user" and not next_title:
+                has_prior_user_message = any(str(existing.get("role") or "") == "user" for existing in history)
+                if not has_prior_user_message:
+                    next_title = _conversation_title_seed(message)
             history.append(item)
             if max_messages > 0:
                 history = history[-max_messages:]
@@ -1379,13 +1395,144 @@ class AssistantConversationRepository:
                 """
                 UPDATE assistant_conversations
                 SET message_history = %s,
+                    title = %s,
                     updated_at = NOW()
                 WHERE tenant_id = %s
                   AND conversation_id = %s
                 """,
-                (Jsonb(history), tenant_id, conversation_id),
+                (Jsonb(history), next_title, tenant_id, conversation_id),
             )
             return history
+
+    def update_title(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+        title: str | None,
+    ) -> dict[str, Any]:
+        normalized_title = _conversation_title_seed(title or "", max_len=120) if title else None
+        with transaction_cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id
+                FROM assistant_conversations
+                WHERE tenant_id = %s
+                  AND conversation_id = %s
+                FOR UPDATE
+                """,
+                (tenant_id, conversation_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise LookupError("conversation not found")
+            if str(row["user_id"]) != str(user_id):
+                raise PermissionError("conversation ownership mismatch")
+
+            cur.execute(
+                """
+                UPDATE assistant_conversations
+                SET title = %s
+                WHERE tenant_id = %s
+                  AND conversation_id = %s
+                RETURNING
+                  conversation_id, tenant_id, user_id, title, message_history,
+                  last_task_result, last_tool_result, user_preferences,
+                  created_at, updated_at
+                """,
+                (normalized_title, tenant_id, conversation_id),
+            )
+            updated = cur.fetchone()
+            assert updated is not None
+            return updated
+
+    def delete_conversation(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+    ) -> None:
+        with transaction_cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  c.user_id,
+                  COALESCE(active_tasks.active_task_count, 0)::int AS active_task_count
+                FROM assistant_conversations c
+                LEFT JOIN LATERAL (
+                  SELECT COUNT(*)::int AS active_task_count
+                  FROM tasks t
+                  WHERE t.tenant_id = c.tenant_id
+                    AND t.created_by = c.user_id
+                    AND COALESCE(t.conversation_id, t.input_masked ->> 'conversation_id', '') = c.conversation_id
+                    AND t.status NOT IN ('SUCCEEDED', 'FAILED_RETRYABLE', 'FAILED_FINAL', 'CANCELLED', 'TIMED_OUT')
+                ) active_tasks ON TRUE
+                WHERE c.tenant_id = %s
+                  AND c.conversation_id = %s
+                FOR UPDATE
+                """,
+                (tenant_id, conversation_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise LookupError("conversation not found")
+            if str(row["user_id"]) != str(user_id):
+                raise PermissionError("conversation ownership mismatch")
+            if int(row.get("active_task_count") or 0) > 0:
+                raise RuntimeError("conversation has active tasks")
+
+            cur.execute(
+                """
+                DELETE FROM agent_subgoals
+                WHERE tenant_id = %s
+                  AND goal_id IN (
+                    SELECT goal_id
+                    FROM agent_goals
+                    WHERE tenant_id = %s
+                      AND user_id = %s
+                      AND COALESCE(conversation_id, '') = %s
+                  )
+                """,
+                (tenant_id, tenant_id, user_id, conversation_id),
+            )
+            cur.execute(
+                """
+                DELETE FROM agent_goals
+                WHERE tenant_id = %s
+                  AND user_id = %s
+                  AND COALESCE(conversation_id, '') = %s
+                """,
+                (tenant_id, user_id, conversation_id),
+            )
+            cur.execute(
+                """
+                DELETE FROM assistant_episodes
+                WHERE tenant_id = %s
+                  AND user_id = %s
+                  AND COALESCE(conversation_id, '') = %s
+                """,
+                (tenant_id, user_id, conversation_id),
+            )
+            cur.execute(
+                """
+                DELETE FROM assistant_turns
+                WHERE tenant_id = %s
+                  AND user_id = %s
+                  AND conversation_id = %s
+                """,
+                (tenant_id, user_id, conversation_id),
+            )
+            cur.execute(
+                """
+                DELETE FROM assistant_conversations
+                WHERE tenant_id = %s
+                  AND user_id = %s
+                  AND conversation_id = %s
+                """,
+                (tenant_id, user_id, conversation_id),
+            )
 
     def update_memory(
         self,

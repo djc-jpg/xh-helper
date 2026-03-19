@@ -12,7 +12,17 @@
 } from "./mas-types";
 import { extractMasEnvelope, extractMasState } from "./mas-utils";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:18000";
+export function resolveApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:18000`;
+  }
+  return "http://localhost:18000";
+}
+
+export const API_BASE = resolveApiBase();
 
 export interface AuthTokens {
   access_token: string;
@@ -106,6 +116,58 @@ async function parseErrorDetail(resp: Response): Promise<string> {
   }
 }
 
+const DETAIL_LABELS: Array<[string, string]> = [
+  ["backend_unreachable", "服务暂时不可用，请稍后再试。"],
+  ["assistant_stream_failed", "这次回复在生成途中中断了，请稍后再试。"],
+  ["stream_failed", "这次回复在生成途中中断了，请稍后再试。"],
+  ["missing_token", "登录状态已失效，请重新登录。"],
+  ["missing auth", "登录状态已失效，请重新登录。"],
+  ["user mismatch", "当前登录身份和会话用户不一致，请刷新后重试。"],
+  ["conversation ownership mismatch", "你没有权限访问这条会话。"],
+  ["workflow_start_failed", "任务启动失败了，请稍后再试。"],
+  ["tool_denied", "这一步需要更高权限或人工确认。"],
+  ["approval_not_approved", "因为没有通过确认，这次操作没有继续执行。"],
+  ["approval_invalid", "这次确认已经失效，请重新发起。"],
+  ["approval_context_invalid", "确认上下文已经变化，请重新发起这次操作。"],
+  ["qwen_not_configured", "当前模型服务还没有配置完成。"],
+  ["qwen_empty_response", "模型这次没有返回内容，请再试一次。"],
+  ["idempotency_in_progress", "同一个请求还在处理中，稍后就会同步结果。"],
+  ["adapter_http_408", "外部服务响应超时了，请稍后重试。"],
+  ["adapter_http_429", "外部服务当前较忙，请稍后重试。"],
+  ["adapter_http_5xx", "外部服务暂时不可用，请稍后重试。"],
+  ["adapter_network_error", "连接外部服务时出了问题，请稍后重试。"],
+  ["timed_out", "处理超时了，请缩小范围后再试一次。"],
+  ["timeout", "处理超时了，请缩小范围后再试一次。"],
+  ["request_failed", "请求失败了，请稍后再试。"]
+];
+
+export function humanizeErrorDetail(detail: string): string {
+  const normalized = String(detail || "").trim();
+  if (!normalized) {
+    return "请求失败了，请稍后再试。";
+  }
+  const lowered = normalized.toLowerCase();
+  for (const [token, label] of DETAIL_LABELS) {
+    if (lowered === token || lowered.includes(token)) {
+      return label;
+    }
+  }
+  return normalized;
+}
+
+export function getDisplayErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return humanizeErrorDetail(error.detail);
+  }
+  if (error instanceof TypeError) {
+    return "服务暂时不可用，请稍后再试。";
+  }
+  if (error instanceof Error) {
+    return humanizeErrorDetail(error.message);
+  }
+  return "请求失败了，请稍后再试。";
+}
+
 interface RequestOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   token?: string;
@@ -143,13 +205,18 @@ export async function requestJson<T>(path: string, options: RequestOptions = {})
     headers.set("Content-Type", "application/json");
   }
 
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
-    cache: "no-store"
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+      cache: "no-store"
+    });
+  } catch {
+    throw new ApiError({ status: 0, detail: "backend_unreachable", requestId });
+  }
 
   if (!resp.ok) {
     const detail = await parseErrorDetail(resp);
@@ -211,6 +278,13 @@ export interface AssistantChatInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface AssistantChatStreamEvent {
+  type: "start" | "delta" | "complete" | "error";
+  delta?: string;
+  detail?: string;
+  response?: AssistantChatResponse;
+}
+
 export async function assistantChat(token: string, input: AssistantChatInput): Promise<AssistantChatResponse> {
   return requestJson<AssistantChatResponse>("/assistant/chat", {
     method: "POST",
@@ -223,6 +297,107 @@ export async function assistantChat(token: string, input: AssistantChatInput): P
       metadata: input.metadata || {}
     }
   });
+}
+
+export async function streamAssistantChat(
+  token: string,
+  input: AssistantChatInput,
+  handlers: {
+    signal?: AbortSignal;
+    onEvent?: (event: AssistantChatStreamEvent) => void;
+  } = {}
+): Promise<AssistantChatResponse | null> {
+  const requestId = createRequestId();
+  const traceId = createRequestId();
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Content-Type", "application/json");
+  headers.set("X-Request-Id", requestId);
+  headers.set("X-Trace-Id", traceId);
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_BASE}/assistant/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        user_id: input.userId,
+        conversation_id: input.conversationId,
+        message: input.message,
+        mode: input.mode || "auto",
+        metadata: input.metadata || {}
+      }),
+      signal: handlers.signal,
+      cache: "no-store"
+    });
+  } catch {
+    throw new ApiError({ status: 0, detail: "backend_unreachable", requestId });
+  }
+
+  if (!resp.ok) {
+    const detail = await parseErrorDetail(resp);
+    const error = new ApiError({ status: resp.status, detail, requestId });
+    if (resp.status === 401) {
+      notifyUnauthorized(error, false);
+    }
+    throw error;
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) {
+    return null;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed: AssistantChatResponse | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      let event: AssistantChatStreamEvent;
+      try {
+        event = JSON.parse(line) as AssistantChatStreamEvent;
+      } catch {
+        continue;
+      }
+      handlers.onEvent?.(event);
+      if (event.type === "error") {
+        throw new Error(event.detail || "stream_failed");
+      }
+      if (event.type === "complete" && event.response) {
+        completed = event.response;
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer.trim()) as AssistantChatStreamEvent;
+      handlers.onEvent?.(event);
+      if (event.type === "error") {
+        throw new Error(event.detail || "stream_failed");
+      }
+      if (event.type === "complete" && event.response) {
+        completed = event.response;
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+    }
+  }
+
+  return completed;
 }
 
 export async function listAssistantConversations(token: string, limit = 30): Promise<AssistantConversationSummary[]> {
@@ -238,6 +413,27 @@ export async function getAssistantConversation(
     `/assistant/conversations/${encodeURIComponent(conversationId)}?task_limit=${Math.max(1, taskLimit)}`,
     { token }
   );
+}
+
+export async function updateAssistantConversation(
+  token: string,
+  conversationId: string,
+  input: { title?: string | null }
+): Promise<AssistantConversationSummary> {
+  return requestJson<AssistantConversationSummary>(`/assistant/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "PATCH",
+    token,
+    body: {
+      title: input.title ?? null
+    }
+  });
+}
+
+export async function deleteAssistantConversation(token: string, conversationId: string): Promise<void> {
+  await requestJson(`/assistant/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "DELETE",
+    token
+  });
 }
 
 export async function getAssistantTaskTrace(token: string, taskId: string): Promise<AssistantTaskTrace> {

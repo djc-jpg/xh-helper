@@ -42,7 +42,8 @@ describe("AuthGate", () => {
       </AuthContext.Provider>
     );
 
-    expect(screen.getByText("需要登录")).toBeInTheDocument();
+    expect(screen.getByText("请先登录")).toBeInTheDocument();
+    expect(screen.getByText("登录后就可以继续对话、查看任务进展，并处理需要确认的操作。")).toBeInTheDocument();
     expect(screen.queryByText("secret content")).not.toBeInTheDocument();
   });
 

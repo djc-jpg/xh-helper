@@ -63,6 +63,7 @@ _SCHEMA_COMPAT_QUERIES = (
     "ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS last_task_result JSONB NOT NULL DEFAULT '{}'::JSONB",
     "ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS last_tool_result JSONB NOT NULL DEFAULT '{}'::JSONB",
     "ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS user_preferences JSONB NOT NULL DEFAULT '{}'::JSONB",
+    "ALTER TABLE assistant_conversations ADD COLUMN IF NOT EXISTS title TEXT",
     "ALTER TABLE assistant_turns ADD COLUMN IF NOT EXISTS response_type TEXT NOT NULL DEFAULT 'direct_answer'",
     "ALTER TABLE assistant_turns ADD COLUMN IF NOT EXISTS runtime_state JSONB NOT NULL DEFAULT '{}'::JSONB",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_assistant_turns_tenant_id ON assistant_turns (tenant_id, turn_id)",

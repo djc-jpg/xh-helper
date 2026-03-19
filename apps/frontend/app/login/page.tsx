@@ -10,7 +10,7 @@ import { z } from "zod";
 import { AuthGate } from "../../components/auth-gate";
 import { ErrorBanner } from "../../components/error-banner";
 import { useAuth } from "../../lib/auth-context";
-import { ApiError } from "../../lib/api";
+import { getDisplayErrorMessage } from "../../lib/api";
 import { AuthStorageMode } from "../../lib/mas-types";
 
 const schema = z.object({
@@ -40,7 +40,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (auth.ready && auth.isAuthenticated) {
-      router.replace("/runs");
+      router.replace("/assistant");
     }
   }, [auth.isAuthenticated, auth.ready, router]);
 
@@ -60,18 +60,17 @@ export default function LoginPage() {
         password: values.password,
         modeOverride: override
       });
-      router.replace("/runs");
+      router.replace("/assistant");
     } catch (error) {
-      const message = error instanceof ApiError ? error.detail : error instanceof Error ? error.message : "登录失败";
-      setError("root", { message });
+      setError("root", { message: getDisplayErrorMessage(error) });
     }
   });
 
   return (
     <div className="panel stack-gap-md">
       <div className="stack-gap-xs">
-        <h2 className="page-title">登录 MAS 控制台</h2>
-        <p className="page-subtitle">登录后可查看闭环运行轨迹、10 Agent 消息流与 Critic 评测。</p>
+        <h2 className="page-title">登录你的账号</h2>
+        <p className="page-subtitle">登录后就可以继续对话、查看任务进展，并处理需要你确认的操作。</p>
       </div>
 
       {auth.sessionHint ? <ErrorBanner message={auth.sessionHint} /> : null}
@@ -109,7 +108,7 @@ export default function LoginPage() {
             <option value="localStorage">跨刷新保持（localStorage）</option>
           </select>
           <p className="muted-text">
-            {storageHint} 生产环境建议使用 HttpOnly Secure Cookie；localStorage 有更高 XSS 持久化风险。
+            {storageHint} 如果你在自己的设备上使用，可以选择跨刷新保持登录。
           </p>
         </div>
 
@@ -120,7 +119,7 @@ export default function LoginPage() {
             {isSubmitting ? "登录中..." : "登录"}
           </button>
           <Link href="/register" className="btn btn-ghost">
-            没有账号？注册
+            没有账号？去创建
           </Link>
         </div>
       </form>

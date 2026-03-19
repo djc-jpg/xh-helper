@@ -330,6 +330,8 @@ export interface AssistantTurnSummary {
   route: "direct_answer" | "tool_task" | "workflow_task";
   status: string;
   current_phase: string;
+  display_state?: string | null;
+  display_summary?: string | null;
   response_type: string;
   user_message: string;
   assistant_message?: string | null;
@@ -361,6 +363,8 @@ export interface AssistantConversationSummary {
   updated_at?: string;
   last_user_message?: string | null;
   last_assistant_message?: string | null;
+  title?: string | null;
+  preview?: string | null;
   last_route?: string | null;
   task_count: number;
   running_task_count: number;
@@ -385,11 +389,15 @@ export interface AssistantTaskCard {
   trace_id: string;
   result_preview?: string | null;
   failure_reason?: string | null;
+  chat_state?: string | null;
+  assistant_summary?: string | null;
 }
 
 export interface AssistantConversationDetail {
   conversation_id: string;
   user_id: string;
+  title?: string | null;
+  preview?: string | null;
   created_at?: string;
   updated_at?: string;
   context_window: number;
@@ -434,6 +442,9 @@ export interface AssistantTraceApproval {
 export interface AssistantTaskTrace {
   task: AssistantTaskCard;
   task_summary: string;
+  assistant_status?: string | null;
+  assistant_summary?: string | null;
+  next_step_hint?: string | null;
   planner: Record<string, unknown>;
   retrieval_hits: Array<Record<string, unknown>>;
   goal?: AgentGoal | null;

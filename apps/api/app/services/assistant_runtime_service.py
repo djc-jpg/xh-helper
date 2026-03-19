@@ -56,14 +56,17 @@ def build_agent_run(turn: dict[str, Any], task_card: dict[str, Any] | None = Non
 
 def build_turn_summary(turn: dict[str, Any], task_card: dict[str, Any] | None = None) -> dict[str, Any]:
     runtime = _as_dict(turn.get("runtime_state"))
+    assistant_message = str(turn.get("assistant_message") or "") or None
     return {
         "turn_id": str(turn.get("turn_id") or ""),
         "route": str(turn.get("route") or "direct_answer"),
         "status": str((task_card or {}).get("status") or turn.get("status") or "RUNNING"),
         "current_phase": str(runtime.get("current_phase") or turn.get("current_phase") or "understand"),
+        "display_state": str((task_card or {}).get("chat_state") or ""),
+        "display_summary": str((task_card or {}).get("assistant_summary") or assistant_message or ""),
         "response_type": str(turn.get("response_type") or "direct_answer"),
         "user_message": str(turn.get("user_message") or ""),
-        "assistant_message": str(turn.get("assistant_message") or "") or None,
+        "assistant_message": assistant_message,
         "task_id": str(turn.get("task_id") or "") or None,
         "trace_id": str(turn.get("trace_id") or ""),
         "created_at": turn.get("created_at"),

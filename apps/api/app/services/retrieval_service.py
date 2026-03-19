@@ -7,10 +7,47 @@ from typing import Any
 from ..config import settings
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9_]{2,}")
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "do",
+    "for",
+    "from",
+    "help",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "me",
+    "of",
+    "on",
+    "or",
+    "please",
+    "tell",
+    "that",
+    "the",
+    "this",
+    "to",
+    "what",
+    "with",
+    "workspace",
+    "you",
+    "your",
+}
 
 
 def _tokenize(text: str) -> list[str]:
-    return TOKEN_PATTERN.findall(text.lower())
+    tokens = TOKEN_PATTERN.findall(text.lower())
+    filtered = [token for token in tokens if token not in STOPWORDS]
+    return filtered or tokens
 
 
 def _snippet(text: str, query_tokens: list[str], max_len: int = 200) -> str:

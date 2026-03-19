@@ -31,7 +31,7 @@ describe("AgentTimeline fallback highlight", () => {
     const highlighted = computeFallbackHighlights(events);
     render(<AgentTimeline events={highlighted} />);
 
-    expect(screen.getByText("Critic FAIL -> Planner 修订")).toBeInTheDocument();
+    expect(screen.getByText("评审失败 -> 重新规划")).toBeInTheDocument();
     expect(screen.getByText("planner revision")).toBeInTheDocument();
   });
 });

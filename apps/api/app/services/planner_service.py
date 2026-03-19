@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ..config import settings
@@ -19,6 +20,11 @@ LEGACY_ACTION_TO_RUNTIME_ACTION = {
     "start_workflow": "workflow_call",
     "need_approval": "approval_request",
 }
+WORD_PATTERN = re.compile(r"[a-z0-9_]+")
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
 class PlannerService:
@@ -77,6 +83,9 @@ class PlannerService:
             tool_candidates=tool_candidates,
             candidate_names=candidate_names,
             metadata=metadata,
+            normalized=message.strip().lower(),
+            forced_mode=(mode or "auto").strip().lower(),
+            retrieval_hits=retrieval_hits,
         )
 
     def plan(
@@ -201,6 +210,9 @@ class PlannerService:
         tool_candidates: list[dict[str, Any]],
         candidate_names: list[str],
         metadata: dict[str, Any],
+        normalized: str,
+        forced_mode: str,
+        retrieval_hits: list[dict[str, Any]],
     ) -> dict[str, Any]:
         merged = dict(base_plan)
         llm_action = str(llm_plan.get("action") or "").strip()
@@ -243,6 +255,8 @@ class PlannerService:
         )
         confirmed = bool((metadata or {}).get("confirmed"))
         requires_approval = bool(selected_tool_meta.get("requires_approval"))
+        if forced_mode == "auto" and self._is_explanatory_question(normalized) and merged["action"] == "start_workflow":
+            merged["action"] = "use_retrieval" if retrieval_hits else "answer_only"
         if requires_approval and merged["action"] == "use_tool" and not confirmed:
             merged["action"] = "need_approval"
         merged["need_confirmation"] = merged["action"] == "need_approval"
@@ -267,8 +281,22 @@ class PlannerService:
         top_tool_requires_approval: bool,
         confirmed: bool,
     ) -> str:
+        durable_markers = (
+            "持续执行",
+            "持续跟进",
+            "继续跟进",
+            "继续推进",
+            "一直跟进",
+            "直到有结果",
+            "发起一个持续执行任务",
+            "发起持续执行任务",
+        )
         if top_tool_requires_approval and self._has_any(normalized, HIGH_RISK_HINTS) and not confirmed:
             return "need_approval"
+        if any(marker in normalized for marker in durable_markers):
+            return "start_workflow"
+        if self._is_explanatory_question(normalized):
+            return "use_retrieval" if retrieval_hits else "answer_only"
         if retrieval_hits and self._is_question_like(normalized):
             return "use_retrieval"
         if tool_candidates and self._has_any(normalized, TOOL_HINTS):
@@ -289,6 +317,8 @@ class PlannerService:
     def _intent(self, normalized: str) -> str:
         if self._has_any(normalized, {"hello", "hi", "help"}):
             return "assistant_help"
+        if self._is_explanatory_question(normalized):
+            return "general_qna"
         if self._has_any(normalized, {"search", "find", "lookup"}):
             return "knowledge_lookup"
         if self._has_any(normalized, {"ticket", "email", "workflow", "report"}):
@@ -300,8 +330,57 @@ class PlannerService:
             return True
         return any(normalized.startswith(word + " ") for word in QUESTION_HINTS)
 
+    def _is_explanatory_question(self, normalized: str) -> bool:
+        explanation_starts = (
+            "how does ",
+            "how do ",
+            "what is ",
+            "what are ",
+            "why does ",
+            "why is ",
+            "explain ",
+            "describe ",
+            "walk me through ",
+        )
+        chinese_starts = (
+            "怎么",
+            "如何",
+            "为什么",
+            "请解释",
+            "解释一下",
+            "解释下",
+            "介绍一下",
+            "介绍下",
+            "什么是",
+        )
+        chinese_markers = (
+            "是怎么",
+            "如何",
+            "为什么",
+            "工作原理",
+            "原理",
+            "什么意思",
+            "怎么工作",
+        )
+        if any(normalized.startswith(prefix) for prefix in explanation_starts):
+            return True
+        if any(normalized.startswith(prefix) for prefix in chinese_starts):
+            return True
+        return _contains_cjk(normalized) and any(marker in normalized for marker in chinese_markers)
+
     def _has_any(self, normalized: str, hints: set[str]) -> bool:
-        return any(h in normalized for h in hints)
+        tokens = set(WORD_PATTERN.findall(normalized))
+        for hint in hints:
+            lowered = hint.strip().lower()
+            if not lowered:
+                continue
+            if " " in lowered:
+                if lowered in normalized:
+                    return True
+                continue
+            if lowered in tokens:
+                return True
+        return False
 
     def _confidence(
         self,
@@ -389,11 +468,17 @@ class PlannerService:
             action_affinities["retrieve"] = max(action_affinities["retrieve"], 0.72)
         if tool_candidates:
             action_affinities["tool_call"] = max(action_affinities["tool_call"], 0.68)
-        if task_type in {"research_summary", "ticket_email"} or self._has_any(normalized, COMPLEX_HINTS):
+        if not self._is_explanatory_question(normalized) and (
+            task_type in {"research_summary", "ticket_email"} or self._has_any(normalized, COMPLEX_HINTS)
+        ):
             action_affinities["workflow_call"] = max(action_affinities["workflow_call"], 0.82)
         if self._is_question_like(normalized):
             action_affinities["respond"] = max(action_affinities["respond"], 0.6)
             action_affinities["retrieve"] = max(action_affinities["retrieve"], 0.7 if retrieval_hits else 0.45)
+        if self._is_explanatory_question(normalized):
+            action_affinities["workflow_call"] = min(action_affinities["workflow_call"], 0.35)
+            action_affinities["retrieve"] = max(action_affinities["retrieve"], 0.8 if retrieval_hits else 0.55)
+            action_affinities["respond"] = max(action_affinities["respond"], 0.7)
 
         reasons = [f"planner_action:{action}"]
         if top_tool_name:

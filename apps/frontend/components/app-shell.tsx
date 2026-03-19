@@ -14,51 +14,55 @@ import { ToastCenter } from "./toast-center";
 const AUTH_PAGES = new Set(["/login", "/register"]);
 
 function resolveWorkspaceCopy(pathname: string): { title: string; subtitle: string } {
-  if (pathname === "/") {
-    return {
-      title: "项目概览",
-      subtitle: "先了解 xh-helper 的定位、主要页面和系统链路"
-    };
-  }
   if (pathname.startsWith("/assistant")) {
     return {
-      title: "对话工作台",
-      subtitle: "从对话入口发起任务，同时查看目标、动作、why-not 和调试信息"
+      title: "\u0041\u0049 \u52a9\u624b",
+      subtitle:
+        "\u50cf\u7528 ChatGPT \u4e00\u6837\u804a\u5929\uff0c\u9700\u8981\u65f6\u518d\u5207\u5230\u5de5\u5177\u3001\u4efb\u52a1\u548c\u6267\u884c\u7ec6\u8282"
+    };
+  }
+  if (pathname === "/") {
+    return {
+      title: "\u9879\u76ee\u6982\u89c8",
+      subtitle:
+        "\u5148\u4e86\u89e3 xh-helper \u7684\u5b9a\u4f4d\u3001\u4e3b\u8981\u9875\u9762\u548c\u7cfb\u7edf\u94fe\u8def"
     };
   }
   if (pathname.startsWith("/runs")) {
     return {
-      title: "运行追踪",
-      subtitle: "查看 workflow、执行步骤、证据、判定结果和状态变化"
+      title: "\u8fd0\u884c\u8ffd\u8e2a",
+      subtitle:
+        "\u67e5\u770b workflow\u3001\u6267\u884c\u6b65\u9aa4\u3001\u8bc1\u636e\u3001\u5224\u5b9a\u7ed3\u679c\u548c\u72b6\u6001\u53d8\u5316"
     };
   }
   if (pathname.startsWith("/playground")) {
     return {
-      title: "发起任务",
-      subtitle: "从工程化入口创建任务，验证不同输入和预算下的系统行为"
+      title: "\u53d1\u8d77\u4efb\u52a1",
+      subtitle:
+        "\u4ece\u5de5\u7a0b\u5316\u5165\u53e3\u521b\u5efa\u4efb\u52a1\uff0c\u9a8c\u8bc1\u4e0d\u540c\u8f93\u5165\u548c\u9884\u7b97\u4e0b\u7684\u7cfb\u7edf\u884c\u4e3a"
     };
   }
   if (pathname.startsWith("/approvals")) {
     return {
-      title: "审批中心",
-      subtitle: "处理高风险动作、人工确认和等待恢复"
+      title: "\u5ba1\u6279\u4e2d\u5fc3",
+      subtitle: "\u5904\u7406\u9ad8\u98ce\u9669\u52a8\u4f5c\u3001\u4eba\u5de5\u786e\u8ba4\u548c\u7b49\u5f85\u6062\u590d"
     };
   }
   if (pathname.startsWith("/monitoring")) {
     return {
-      title: "系统观测",
-      subtitle: "查看健康度、吞吐和整体运行情况"
+      title: "\u7cfb\u7edf\u89c2\u6d4b",
+      subtitle: "\u67e5\u770b\u5065\u5eb7\u5ea6\u3001\u541e\u5410\u548c\u6574\u4f53\u8fd0\u884c\u60c5\u51b5"
     };
   }
   if (pathname.startsWith("/settings")) {
     return {
-      title: "系统设置",
-      subtitle: "调整策略、访问控制和界面偏好"
+      title: "\u7cfb\u7edf\u8bbe\u7f6e",
+      subtitle: "\u8c03\u6574\u7b56\u7565\u3001\u8bbf\u95ee\u63a7\u5236\u548c\u754c\u9762\u504f\u597d"
     };
   }
   return {
     title: "xh-helper",
-    subtitle: "任务执行与调试平台"
+    subtitle: "\u901a\u7528\u667a\u80fd\u4f53\u8fd0\u884c\u65f6"
   };
 }
 
@@ -98,12 +102,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="app-brand-mark">xh</span>
             <div className="stack-gap-xs">
               <span className="app-brand-title">xh-helper</span>
-              <span className="app-brand-subtitle">任务执行与调试平台</span>
+              <span className="app-brand-subtitle">{"\u901a\u7528\u667a\u80fd\u4f53\u8fd0\u884c\u65f6"}</span>
             </div>
           </Link>
 
           <Link href="/assistant" className="btn btn-primary app-compose-link">
-            新建对话
+            {"\u65b0\u5bf9\u8bdd"}
           </Link>
         </div>
 
@@ -111,20 +115,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="app-sidebar-footer">
           <div className="user-chip app-user-chip">
-            <span>{auth.user?.email || "访客"}</span>
+            <span>{auth.user?.email || "\u8bbf\u5ba2"}</span>
             <span className="muted-text">{auth.user?.role || "viewer"}</span>
           </div>
 
           <div className="app-sidebar-controls">
             <button type="button" className="btn btn-ghost" onClick={toggleTheme}>
-              {theme === "dark" ? "浅色" : "深色"}
+              {theme === "dark" ? "\u6d45\u8272" : "\u6df1\u8272"}
             </button>
             <button
               type="button"
               className="btn btn-ghost"
               onClick={() => setLanguage(language === "zh" ? "en" : "zh")}
             >
-              {language === "zh" ? "EN" : "中文"}
+              {language === "zh" ? "EN" : "\u4e2d\u6587"}
             </button>
             {auth.isAuthenticated ? (
               <button

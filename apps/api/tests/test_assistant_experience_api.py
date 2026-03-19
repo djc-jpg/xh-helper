@@ -1,6 +1,7 @@
 import unittest
+import json
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -36,6 +37,7 @@ class AssistantExperienceApiTests(unittest.TestCase):
                 "conversation_id": "conv-001",
                 "tenant_id": "default",
                 "user_id": "00000000-0000-0000-0000-000000000001",
+                "title": None,
                 "message_history": [
                     {"role": "user", "message": "hello"},
                     {"role": "assistant", "message": "hi there", "route": "direct_answer"},
@@ -58,6 +60,7 @@ class AssistantExperienceApiTests(unittest.TestCase):
         self.assertEqual("conv-001", data[0]["conversation_id"])
         self.assertEqual("hello", data[0]["last_user_message"])
         self.assertEqual("hi there", data[0]["last_assistant_message"])
+        self.assertEqual("hello", data[0]["title"])
         self.assertEqual(1, data[0]["running_task_count"])
 
     def test_get_assistant_conversation_detail(self) -> None:
@@ -66,6 +69,7 @@ class AssistantExperienceApiTests(unittest.TestCase):
             "conversation_id": "conv-002",
             "tenant_id": "default",
             "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Docs search",
             "message_history": [
                 {"role": "user", "message": "search docs"},
                 {"role": "assistant", "message": "done", "route": "tool_task"},
@@ -102,11 +106,105 @@ class AssistantExperienceApiTests(unittest.TestCase):
         self.assertEqual(200, resp.status_code)
         data = resp.json()
         self.assertEqual("conv-002", data["conversation_id"])
+        self.assertEqual("Docs search", data["title"])
         self.assertEqual(2, data["context_window"])
         self.assertEqual([], data["turn_history"])
         self.assertEqual(1, len(data["task_history"]))
         self.assertEqual("tool_task", data["task_history"][0]["route"])
         self.assertTrue(data["task_history"][0]["status_label"])
+
+    def test_patch_assistant_conversation_title(self) -> None:
+        now = datetime.now(tz=timezone.utc)
+        updated = {
+            "conversation_id": "conv-003",
+            "tenant_id": "default",
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "title": "Release checklist",
+            "message_history": [
+                {"role": "user", "message": "help me ship this release"},
+                {"role": "assistant", "message": "let's break it down", "route": "direct_answer"},
+            ],
+            "last_task_result": {},
+            "last_tool_result": {},
+            "user_preferences": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        with patch.object(conversation_repo, "update_title", return_value=updated) as update_title:
+            resp = self.client.patch("/assistant/conversations/conv-003", json={"title": "Release checklist"})
+        self.assertEqual(200, resp.status_code)
+        data = resp.json()
+        self.assertEqual("conv-003", data["conversation_id"])
+        self.assertEqual("Release checklist", data["title"])
+        update_title.assert_called_once()
+
+    def test_delete_assistant_conversation(self) -> None:
+        with patch.object(conversation_repo, "delete_conversation", return_value=None) as delete_conversation:
+            resp = self.client.delete("/assistant/conversations/conv-004")
+        self.assertEqual(204, resp.status_code)
+        delete_conversation.assert_called_once()
+
+    def test_assistant_chat_stream_serializes_complete_response(self) -> None:
+        now = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        service_result = {
+            "conversation_id": "conv-stream-001",
+            "route": "direct_answer",
+            "response_type": "direct_answer",
+            "message": "streamed answer",
+            "task": None,
+            "tool_result": None,
+            "planner": {},
+            "retrieval_hits": [],
+            "memory": {},
+            "need_confirmation": False,
+            "trace_id": "trace-stream-001",
+            "turn": {
+                "turn_id": "turn-stream-001",
+                "route": "direct_answer",
+                "status": "SUCCEEDED",
+                "current_phase": "respond",
+                "display_state": "已完成",
+                "display_summary": "streamed answer",
+                "response_type": "direct_answer",
+                "user_message": "hello",
+                "assistant_message": "streamed answer",
+                "task_id": None,
+                "trace_id": "trace-stream-001",
+                "created_at": now,
+                "updated_at": now,
+                "agent_run": {
+                    "turn_id": "turn-stream-001",
+                    "route": "direct_answer",
+                    "status": "SUCCEEDED",
+                    "current_phase": "respond",
+                    "task_id": None,
+                    "trace_id": "trace-stream-001",
+                    "planner": {},
+                    "retrieval_hits": [],
+                    "memory": {},
+                    "episodes": [],
+                    "observations": [],
+                    "steps": [],
+                    "final_output": {"message": "streamed answer"},
+                },
+            },
+        }
+        with patch("app.main.service_assistant_chat", new=AsyncMock(return_value=service_result)):
+            resp = self.client.post(
+                "/assistant/chat/stream",
+                json={
+                    "user_id": "00000000-0000-0000-0000-000000000001",
+                    "message": "hello",
+                    "mode": "auto",
+                    "metadata": {},
+                },
+            )
+        self.assertEqual(200, resp.status_code)
+        events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+        self.assertEqual("start", events[0]["type"])
+        self.assertEqual("complete", events[-1]["type"])
+        self.assertEqual("streamed answer", events[-1]["response"]["message"])
+        self.assertEqual("2026-03-18T12:00:00Z", events[-1]["response"]["turn"]["created_at"])
 
     def test_get_assistant_task_trace(self) -> None:
         now = datetime.now(tz=timezone.utc)
@@ -251,6 +349,7 @@ class AssistantExperienceApiTests(unittest.TestCase):
         self.assertEqual("respond", data["current_action"]["fallback"])
         self.assertEqual("Need durable execution first.", data["runtime_debugger"]["why_not"]["respond"])
         self.assertEqual(1, len(data["runtime_steps"]))
+        self.assertEqual("等待确认", data["assistant_status"])
         self.assertIn("任务类型", data["task_summary"])
 
 

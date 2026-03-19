@@ -3,6 +3,10 @@ from unittest.mock import AsyncMock, patch
 
 from app.config import settings
 from app.schemas import AssistantChatRequest
+from app.services.assistant_orchestration_service import (
+    _capability_overview_response,
+    _fallback_response_with_retrieval,
+)
 from app.services.assistant_service import assistant_chat
 
 
@@ -80,6 +84,7 @@ class _FakeTaskRepo:
         self.created_runs = 0
         self.audit_logs = 0
         self.last_create_task_kwargs: dict | None = None
+        self.conversation_tasks: list[dict] = []
 
     def create_task(self, **kwargs):
         self.created_tasks += 1
@@ -116,6 +121,11 @@ class _FakeTaskRepo:
     def insert_audit_log(self, **kwargs) -> None:
         del kwargs
         self.audit_logs += 1
+
+    def list_assistant_tasks_for_conversation(self, *, tenant_id: str, user_id: str, conversation_id: str, limit: int = 30):
+        del tenant_id, user_id
+        rows = [row for row in self.conversation_tasks if str(row.get("conversation_id") or "") == conversation_id]
+        return rows[:limit]
 
 
 class _FakeTurnRepo:
@@ -377,7 +387,146 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual("Qwen says: the workflow is durable.", result["message"])
         self.assertEqual("direct_answer", result["response_type"])
-        self.assertEqual(15.0, qwen_chat.await_args.kwargs["timeout_s"])
+        self.assertEqual(20.0, qwen_chat.await_args.kwargs["timeout_s"])
+
+    async def test_chinese_direct_answer_uses_shorter_qwen_timeout(self) -> None:
+        req = AssistantChatRequest(
+            user_id=self.user["id"],
+            conversation_id="conv-qwen-cn",
+            message="\u8fd9\u4e2a workflow runtime \u662f\u600e\u4e48\u5de5\u4f5c\u7684\uff1f",
+            mode="direct_answer",
+            metadata={},
+        )
+        qwen_chat = AsyncMock(return_value="\u5b83\u4e3b\u8981\u8d1f\u8d23\u6301\u7eed\u6267\u884c\u548c\u72b6\u6001\u7f16\u6392\u3002")
+        with (
+            patch("app.services.assistant_orchestration_service.qwen_client.is_enabled", return_value=True),
+            patch("app.services.assistant_orchestration_service.qwen_client.chat_text", new=qwen_chat),
+        ):
+            result = await assistant_chat(
+                conversation_repo=self.conversation_repo,
+                episode_repo=self.episode_repo,
+                turn_repo=self.turn_repo,
+                task_repo=self.task_repo,
+                tool_repo=self.tool_repo,
+                gateway=self.gateway,
+                req=req,
+                tenant_id="default",
+                user=self.user,
+                trace_id="trace-qwen-cn",
+                start_workflow=self.start_workflow,
+            )
+        self.assertEqual("它主要负责持续执行和状态编排。", result["message"])
+        self.assertEqual(12.0, qwen_chat.await_args.kwargs["timeout_s"])
+
+    def test_acknowledgement_fallback_ignores_retrieval_noise(self) -> None:
+        message = "Please reply in one short sentence to confirm you received this browser test message."
+        retrieval_hits = [
+            {
+                "title": "product",
+                "snippet": "ble workflow execution. - LangGraph for stateful graph planning.",
+            }
+        ]
+
+        result = _fallback_response_with_retrieval(message, retrieval_hits, memory={})
+
+        self.assertEqual("I received your message and can reply normally.", result)
+
+    def test_english_retrieval_fallback_stays_in_english(self) -> None:
+        result = _fallback_response_with_retrieval(
+            "How does the workflow runtime work in this repo?",
+            [{"title": "product", "snippet": "Temporal coordinates durable execution."}],
+            memory={},
+        )
+
+        self.assertIn("I'll answer from the current workspace context first.", result)
+        self.assertIn("Reference: product", result)
+
+    def test_chinese_retrieval_fallback_reads_like_a_direct_answer(self) -> None:
+        result = _fallback_response_with_retrieval(
+            "\u8fd9\u4e2a workflow runtime \u662f\u600e\u4e48\u5de5\u4f5c\u7684\uff1f",
+            [{"title": "runtime docs", "snippet": "Temporal \u8d1f\u8d23\u6301\u4e45\u5316\u6267\u884c\uff0cLangGraph \u8d1f\u8d23\u6709\u72b6\u6001\u89c4\u5212\u3002"}],
+            memory={},
+        )
+
+        self.assertIn("\u76f4\u63a5\u7ed3\u8bba", result)
+        self.assertIn("Temporal", result)
+
+    def test_chinese_retrieval_fallback_does_not_dump_raw_english_snippet(self) -> None:
+        result = _fallback_response_with_retrieval(
+            "\u8fd9\u4e2a workflow runtime \u662f\u600e\u4e48\u5de5\u4f5c\u7684\uff1f",
+            [{"title": "product", "snippet": "Supports multi-agent orchestration with Temporal, LangGraph, and Tool Gateway."}],
+            memory={},
+        )
+
+        self.assertIn("Temporal", result)
+        self.assertIn("LangGraph", result)
+        self.assertIn("Tool Gateway", result)
+        self.assertNotIn("Supports multi-agent orchestration", result)
+
+    def test_capability_overview_matches_workspace_phrasing(self) -> None:
+        result = _capability_overview_response("Please tell me what you can do in this workspace.")
+
+        self.assertIsNotNone(result)
+        self.assertIn("coding", result)
+
+    def test_optimization_request_returns_ranked_project_advice(self) -> None:
+        result = _fallback_response_with_retrieval(
+            "\u57fa\u4e8e\u5f53\u524d\u9879\u76ee\u72b6\u6001\uff0c\u7ed9\u6211\u4e00\u4e2a\u53ef\u843d\u5730\u7684\u4f18\u5316\u65b9\u6848\uff0c\u4f18\u5148\u6309\u6536\u76ca\u6392\u5e8f\u3002",
+            [],
+            memory={},
+        )
+
+        self.assertIn("1.", result)
+        self.assertIn("2.", result)
+        self.assertIn("\u9ad8\u9891\u4e3b\u8def\u5f84", result)
+
+    def test_repo_module_question_returns_concrete_module_map(self) -> None:
+        result = _fallback_response_with_retrieval(
+            "\u5e2e\u6211\u5b9a\u4f4d\u8fd9\u4e2a\u4ed3\u5e93\u91cc\u6700\u503c\u5f97\u5148\u770b\u7684\u5173\u952e\u6a21\u5757\uff0c\u5e76\u89e3\u91ca\u5b83\u4eec\u4e4b\u95f4\u7684\u5173\u7cfb\u3002",
+            [],
+            memory={},
+        )
+
+        self.assertIn("apps/api", result)
+        self.assertIn("apps/worker", result)
+        self.assertIn("runtime_backbone", result)
+
+    async def test_progress_followup_prefers_latest_task_status(self) -> None:
+        self.task_repo.conversation_tasks = [
+            {
+                "id": "task-progress-1",
+                "conversation_id": "conv-progress",
+                "task_type": "research_summary",
+                "status": "SUCCEEDED",
+                "latest_step_key": "workflow_start",
+                "result_preview": "\u4efb\u52a1\u5df2\u7ecf\u5b8c\u6210\u5f53\u524d\u8fd9\u4e00\u8f6e\u5904\u7406\uff0c\u4f60\u53ef\u4ee5\u7ee7\u7eed\u8ffd\u95ee\uff0c\u6216\u53d1\u8d77\u4e0b\u4e00\u6b65\u3002",
+            }
+        ]
+        req = AssistantChatRequest(
+            user_id=self.user["id"],
+            conversation_id="conv-progress",
+            message="\u73b0\u5728\u8fdb\u5c55\u5230\u54ea\u4e00\u6b65\u4e86\uff1f",
+            mode="auto",
+            metadata={},
+        )
+        result = await assistant_chat(
+            conversation_repo=self.conversation_repo,
+            episode_repo=self.episode_repo,
+            turn_repo=self.turn_repo,
+            task_repo=self.task_repo,
+            tool_repo=self.tool_repo,
+            gateway=self.gateway,
+            req=req,
+            tenant_id="default",
+            user=self.user,
+            trace_id="trace-progress-followup",
+            start_workflow=self.start_workflow,
+        )
+
+        self.assertEqual("direct_answer", result["route"])
+        self.assertIn("\u5df2\u7ecf\u5b8c\u6210", result["message"])
+        self.assertIn("workflow_start", result["message"])
+        self.assertIn("\u6700\u65b0\u7ed3\u679c", result["message"])
 
     async def test_tool_task_fast_path(self) -> None:
         req = AssistantChatRequest(
@@ -450,6 +599,8 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("need_approval", result["planner"]["action"])
         self.assertEqual("wait", result["turn"]["agent_run"]["current_action"]["action_type"])
         self.assertTrue(result["turn"]["agent_run"]["policy"]["approval_triggered"])
+        self.assertIn("\u9ad8\u98ce\u9669\u64cd\u4f5c", result["message"])
+        self.assertNotIn("email_ticketing", result["message"])
 
     async def test_confirmed_high_risk_tool_routes_to_workflow(self) -> None:
         self.tool_repo.tools = [
@@ -570,8 +721,11 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             trace_id="trace-memory-2",
             start_workflow=self.start_workflow,
         )
-        lowered = result["message"].lower()
-        self.assertTrue("last tool result" in lowered or "asyncio docs" in lowered or "web_search" in lowered)
+        self.assertTrue(
+            "上一轮工具执行的结果摘要" in result["message"]
+            or "asyncio docs" in result["message"]
+            or "web_search" in result["message"]
+        )
 
     async def test_ambiguous_request_triggers_ask_user(self) -> None:
         req = AssistantChatRequest(
@@ -595,7 +749,7 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             start_workflow=self.start_workflow,
         )
         self.assertEqual("direct_answer", result["route"])
-        self.assertIn("need one more detail", result["message"].lower())
+        self.assertIn("关键信息", result["message"])
         self.assertEqual("ask_user", result["turn"]["agent_run"]["current_action"]["action_type"])
 
     async def test_episode_biases_route_to_workflow(self) -> None:
@@ -688,8 +842,43 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual("workflow_task", result["route"])
         self.assertEqual("task_created", result["response_type"])
-        self.assertIn("safer retry path", result["message"])
+        self.assertIn("外部服务当前较忙", result["message"])
+        self.assertIn("持续执行任务 task-fallback", result["message"])
         self.assertEqual("replan", result["turn"]["agent_run"]["current_action"]["action_type"])
+
+    async def test_final_tool_failure_uses_natural_chinese_feedback(self) -> None:
+        failing_gateway = AsyncMock(
+            return_value={
+                "status": "FAILED",
+                "reason_code": "tool_denied",
+                "result": {"error": "permission denied"},
+            }
+        )
+        self.gateway.execute = failing_gateway
+        req = AssistantChatRequest(
+            user_id=self.user["id"],
+            conversation_id="conv-final-failure",
+            message="search temporal workflow docs.python.org",
+            mode="tool_task",
+            metadata={},
+        )
+        result = await assistant_chat(
+            conversation_repo=self.conversation_repo,
+            episode_repo=self.episode_repo,
+            turn_repo=self.turn_repo,
+            task_repo=self.task_repo,
+            tool_repo=self.tool_repo,
+            gateway=self.gateway,
+            req=req,
+            tenant_id="default",
+            user=self.user,
+            trace_id="trace-final-failure",
+            start_workflow=self.start_workflow,
+        )
+        self.assertEqual("tool_task", result["route"])
+        self.assertEqual("direct_answer", result["response_type"])
+        self.assertIn("更高权限或额外确认", result["message"])
+        self.assertNotIn("tool_denied", result["message"])
 
     async def test_retry_heavy_episode_biases_initial_route_to_workflow(self) -> None:
         self.episode_repo.rows = [
