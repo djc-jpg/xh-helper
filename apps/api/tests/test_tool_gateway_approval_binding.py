@@ -5,12 +5,12 @@ from app.policy import check_tool_policy
 
 
 class ToolGatewayApprovalBindingTests(unittest.TestCase):
-    def _caller(self) -> dict[str, str]:
+    def _caller(self, *, role: str = "operator", email: str = "operator@example.com") -> dict[str, str]:
         return {
             "id": "00000000-0000-0000-0000-000000000003",
             "tenant_id": "default",
-            "email": "operator@example.com",
-            "role": "operator",
+            "email": email,
+            "role": role,
         }
 
     @patch("app.policy.fetchall")
@@ -123,6 +123,75 @@ class ToolGatewayApprovalBindingTests(unittest.TestCase):
             user=self._caller(),
             task_type="tool_flow",
             tool_id="internal_rest_api",
+            is_write_action=True,
+            approval_id="approval-1",
+            task_id="task-a",
+            run_id="run-a",
+            environment="local",
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual("ok", reason)
+
+    @patch("app.policy.fetchall")
+    @patch("app.policy.fetchone")
+    def test_allows_user_when_matching_approved_binding_exists(self, fetchone, fetchall) -> None:
+        fetchall.return_value = [
+            {
+                "effect": "allow",
+                "role_min": "operator",
+                "task_type": None,
+                "tool_id": "internal_rest_api",
+                "environment": "local",
+                "is_write_action": True,
+                "requires_approval": True,
+            }
+        ]
+        fetchone.return_value = {"id": "approval-1", "status": "APPROVED", "approver_role": "operator"}
+
+        allowed, reason = check_tool_policy(
+            user=self._caller(role="user", email="user@example.com"),
+            task_type="tool_flow",
+            tool_id="internal_rest_api",
+            is_write_action=True,
+            approval_id="approval-1",
+            task_id="task-a",
+            run_id="run-a",
+            environment="local",
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual("ok", reason)
+
+    @patch("app.policy.fetchall")
+    @patch("app.policy.fetchone")
+    def test_approved_operator_can_override_user_deny_for_email_ticketing(self, fetchone, fetchall) -> None:
+        fetchall.return_value = [
+            {
+                "effect": "allow",
+                "role_min": "operator",
+                "task_type": None,
+                "tool_id": "email_ticketing",
+                "environment": "local",
+                "is_write_action": True,
+                "requires_approval": True,
+            },
+            {
+                "effect": "deny",
+                "role_min": "user",
+                "task_type": None,
+                "tool_id": "email_ticketing",
+                "environment": "local",
+                "is_write_action": True,
+                "requires_approval": True,
+            },
+        ]
+        fetchone.return_value = {"id": "approval-1", "status": "APPROVED", "approver_role": "operator"}
+
+        allowed, reason = check_tool_policy(
+            user=self._caller(role="user", email="user@example.com"),
+            task_type="ticket_email",
+            tool_id="email_ticketing",
             is_write_action=True,
             approval_id="approval-1",
             task_id="task-a",

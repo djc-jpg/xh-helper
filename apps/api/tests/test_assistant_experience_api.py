@@ -340,7 +340,7 @@ class AssistantExperienceApiTests(unittest.TestCase):
         self.assertEqual(200, resp.status_code)
         data = resp.json()
         self.assertEqual("task-3", data["task"]["task_id"])
-        self.assertEqual("等待审批", data["task"]["status_label"])
+        self.assertEqual("等待确认", data["task"]["status_label"])
         self.assertEqual(1, len(data["retrieval_hits"]))
         self.assertEqual(1, len(data["tool_calls"]))
         self.assertEqual(1, len(data["approvals"]))

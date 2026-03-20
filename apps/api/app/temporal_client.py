@@ -14,6 +14,13 @@ _forced_signal_failures: set[str] = set()
 _forced_signal_lock = asyncio.Lock()
 
 
+def _workflow_execution_timeout(payload: dict[str, Any]) -> timedelta:
+    ttl_seconds = int(payload.get("global_ttl_sec", 600) or 600)
+    grace_seconds = 300
+    minimum_seconds = 900
+    return timedelta(seconds=max(ttl_seconds + grace_seconds, minimum_seconds))
+
+
 async def get_temporal_client() -> Client:
     global _client
     async with _lock:
@@ -28,12 +35,14 @@ async def get_temporal_client() -> Client:
 
 async def start_task_workflow(workflow_id: str, payload: dict[str, Any]) -> None:
     client = await get_temporal_client()
+    execution_timeout = _workflow_execution_timeout(payload)
     await client.start_workflow(
         "TaskWorkflow",
         payload,
         id=workflow_id,
         task_queue=settings.temporal_task_queue,
-        execution_timeout=timedelta(minutes=10),
+        execution_timeout=execution_timeout,
+        run_timeout=execution_timeout,
     )
 
 

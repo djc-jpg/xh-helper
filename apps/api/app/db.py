@@ -155,6 +155,42 @@ _SCHEMA_COMPAT_QUERIES = (
     "CREATE INDEX IF NOT EXISTS idx_agent_subgoals_goal_sequence ON agent_subgoals (tenant_id, goal_id, sequence_no ASC)",
     "CREATE INDEX IF NOT EXISTS idx_agent_subgoals_status ON agent_subgoals (tenant_id, status, updated_at DESC)",
     "ALTER TABLE agent_subgoals ADD COLUMN IF NOT EXISTS depends_on JSONB NOT NULL DEFAULT '[]'::JSONB",
+    """
+    UPDATE tool_registry
+    SET
+      risk_level = 'medium',
+      requires_approval = FALSE,
+      supported_use_cases = ARRAY['internal_data_lookup', 'records_query']::TEXT[],
+      updated_at = NOW()
+    WHERE tenant_id = 'default' AND tool_id = 'internal_rest_api'
+    """,
+    """
+    UPDATE tool_registry
+    SET
+      risk_level = 'low',
+      requires_approval = FALSE,
+      supported_use_cases = ARRAY['knowledge_lookup', 'docs_search']::TEXT[],
+      updated_at = NOW()
+    WHERE tenant_id = 'default' AND tool_id = 'web_search'
+    """,
+    """
+    UPDATE tool_registry
+    SET
+      risk_level = 'high',
+      requires_approval = TRUE,
+      supported_use_cases = ARRAY['ticket_action', 'notification_send']::TEXT[],
+      updated_at = NOW()
+    WHERE tenant_id = 'default' AND tool_id = 'email_ticketing'
+    """,
+    """
+    UPDATE tool_registry
+    SET
+      risk_level = 'medium',
+      requires_approval = TRUE,
+      supported_use_cases = ARRAY['artifact_write', 'report_persist']::TEXT[],
+      updated_at = NOW()
+    WHERE tenant_id = 'default' AND tool_id = 'object_storage'
+    """,
 )
 
 

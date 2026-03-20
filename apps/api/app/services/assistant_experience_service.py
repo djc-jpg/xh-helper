@@ -110,7 +110,7 @@ def _conversation_preview(
     waiting_approval_count: int,
 ) -> str:
     if waiting_approval_count > 0:
-        return "这条对话里有任务正在等你确认。"
+        return "这条对话里有任务正在等待人工确认。"
     if running_task_count > 0:
         return "这条对话里还有任务在继续执行。"
     preview = _trim_text(last_assistant, 88) or _trim_text(last_user, 88)
@@ -211,7 +211,7 @@ def _progress_message(
     tool_call_count: int,
 ) -> tuple[str, str | None, str | None]:
     if waiting_approval_count > 0 or status == "WAITING_HUMAN":
-        return ("这一步需要你确认后我再继续。", "等待你的确认", "确认后我会自动继续处理")
+        return ("这一步正在等待人工确认。", "等待人工确认", "确认完成后我会自动继续处理")
     if status == "WAITING_TOOL":
         return ("我已经发起工具调用，正在等结果回来。", "等待工具返回", "工具结果回来后我会继续")
     if status == "SUCCEEDED":

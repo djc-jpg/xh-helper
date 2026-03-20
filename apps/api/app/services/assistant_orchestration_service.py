@@ -62,8 +62,8 @@ TOOL_FAILURE_USER_MESSAGES = {
     "adapter_http_5xx": "外部服务暂时不可用，我可以稍后重试，或者先帮你改走别的路径。",
     "adapter_network_error": "连接外部服务时出了点问题，我可以稍后再试一次。",
     "idempotency_in_progress": "同一请求还在处理中，稍后我会把结果继续回到这条对话里。",
-    "write_requires_approval": "这一步需要你先确认，我确认后才能继续。",
-    "approval_not_approved": "因为这一步还没有得到你的确认，我先暂停在这里。",
+    "write_requires_approval": "这一步需要有权限的操作员确认，确认后我才能继续。",
+    "approval_not_approved": "因为这一步还没有得到有权限的操作员确认，我先暂停在这里。",
     "approval_invalid": "刚才那次确认已经失效了，请你重新发起一次。",
     "approval_context_invalid": "你确认时上下文已经变了，我们需要重新发起这一步。",
     "qwen_not_configured": "当前模型服务还没有准备好，暂时没法直接完成这一步。",
@@ -1575,10 +1575,16 @@ async def orchestrate_assistant_chat(
         }
 
     if str(current_action.get("action_type") or "") == "approval_request":
-        answer = (
-            "接下来这一步涉及高风险操作，需要你先确认。"
-            "你确认后我会继续帮你处理；如果你暂时不想当场确认，我也可以转成持续执行任务，后续再跟进。"
-        )
+        if str(user.get("role") or "") in {"owner", "operator"}:
+            answer = (
+                "接下来这一步涉及高风险操作，需要你先确认。"
+                "你确认后我会继续帮你处理；如果你暂时不想当场确认，我也可以转成持续执行任务，后续再跟进。"
+            )
+        else:
+            answer = (
+                "接下来这一步涉及高风险操作，需要有权限的操作员确认后我才能继续。"
+                "如果你自己有 operator 或 owner 权限，可以去审批中心处理；否则确认完成后我会自动继续。"
+            )
         task_state["pending_approvals"] = [selected_tool_name or "selected_tool"]
         task_state["current_phase"] = "approval_request"
         steps.append(

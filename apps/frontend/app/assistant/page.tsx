@@ -667,11 +667,39 @@ export default function AssistantPage() {
     return items;
   }, [selectedConversationId, sortedTurns, streamingDraft, tasksById]);
   const waitingApprovals = traceQuery.data?.approvals?.filter((item) => item.status === "WAITING_HUMAN") || [];
+  const primaryWaitingApproval = waitingApprovals[0];
+  const waitingApprovalMessage = primaryWaitingApproval
+    ? (() => {
+        const hint = `${primaryWaitingApproval.action_hint || primaryWaitingApproval.reason || ""}`.trim();
+        if (isOperator) {
+          return hint || "确认后我会继续完成剩余步骤。";
+        }
+        if (hint && !/需要你|你确认后/.test(hint)) {
+          return hint;
+        }
+        return "这一步正在等待有权限的操作员确认。确认完成后任务会自动继续；如果你自己有 operator 或 owner 权限，可以去审批中心处理。";
+      })()
+    : "";
+  const waitingStatusLabel = isOperator ? "\u7b49\u5f85\u786e\u8ba4" : "\u7b49\u5f85\u64cd\u4f5c\u5458\u786e\u8ba4";
+  const waitingBannerTitle = isOperator
+    ? "\u8fd9\u8f6e\u6267\u884c\u6b63\u5728\u7b49\u5f85\u786e\u8ba4"
+    : "\u8fd9\u8f6e\u6267\u884c\u6b63\u5728\u7b49\u5f85\u64cd\u4f5c\u5458\u786e\u8ba4";
   const runtimeSteps: AgentRuntimeStep[] = traceQuery.data?.runtime_steps || selectedTurn?.agent_run.steps || [];
+  const pendingConfirmHint = pendingConfirmMessage
+    ? isOperator
+      ? "上一条请求需要你确认后再继续。"
+      : "如果你确认要继续，我会先为你发起执行；后续高风险步骤仍可能需要有权限的操作员审批。"
+    : "默认会先直接回答；如果任务更复杂，系统会自动转成工具调用或持续执行。";
+  const pendingConfirmButtonLabel = isOperator ? "确认并继续" : "我确认这项请求";
 
   const runningConversationCount = useMemo(() => {
     return (conversationsQuery.data || []).filter((item) => item.running_task_count > 0).length;
   }, [conversationsQuery.data]);
+  const sidebarSummary = waitingApprovals.length
+    ? `\u5f53\u524d\u6709 ${waitingApprovals.length} \u9879\u7b49\u5f85\u786e\u8ba4\u7684\u64cd\u4f5c\u3002`
+    : runningConversationCount > 0
+      ? `\u5f53\u524d\u6709 ${runningConversationCount} \u6761\u5bf9\u8bdd\u4ecd\u5728\u7ee7\u7eed\u6267\u884c\u3002`
+      : "\u4ece\u5de6\u4fa7\u9009\u62e9\u4f1a\u8bdd\uff0c\u6216\u76f4\u63a5\u5f00\u59cb\u4e00\u6761\u65b0\u5bf9\u8bdd\u3002";
 
   useEffect(() => {
     if (!threadViewportRef.current) return;
@@ -805,6 +833,7 @@ export default function AssistantPage() {
 
   const selectedConversationTitle = conversationTitle(conversationQuery.data?.title, activeConversationSummary);
   const selectedConversationPreview = conversationQuery.data?.preview || conversationPreview(activeConversationSummary);
+  const selectedNextStepHint = traceQuery.data?.next_step_hint || selectedTaskCard?.next_action || "";
 
   const startRenamingConversation = () => {
     if (!selectedConversationId || creatingNewConversation || isStreaming) return;
@@ -848,11 +877,11 @@ export default function AssistantPage() {
 
         <div className="assistant-chat-product-shell">
           <aside className="assistant-chat-sidebar panel">
-            <div className="assistant-chat-sidebar-top">
-              <div className="assistant-chat-brand">
-                <p className="assistant-chat-brand-kicker">{"\u0041\u0049 \u52a9\u624b"}</p>
-                <h1>{"\u6e05\u6670\u804a\u5929\uff0c\u9700\u8981\u65f6\u518d\u6267\u884c"}</h1>
-                <p className="assistant-chat-brand-copy">{"\u76f4\u63a5\u8f93\u5165\u95ee\u9898\u6216\u4efb\u52a1\uff0c\u6211\u4f1a\u5148\u76f4\u63a5\u56de\u7b54\uff0c\u9700\u8981\u65f6\u518d\u8c03\u7528\u5de5\u5177\u6216\u8fdb\u5165\u6267\u884c\u6d41\u7a0b\u3002"}</p>
+              <div className="assistant-chat-sidebar-top">
+                <div className="assistant-chat-brand">
+                  <p className="assistant-chat-brand-kicker">{"\u0041\u0049 \u52a9\u624b"}</p>
+                  <h1>{"\u6e05\u6670\u804a\u5929\uff0c\u9700\u8981\u65f6\u518d\u6267\u884c"}</h1>
+                  <p className="assistant-chat-brand-copy">{"\u76f4\u63a5\u8f93\u5165\u95ee\u9898\u6216\u4efb\u52a1\uff0c\u6211\u4f1a\u5148\u76f4\u63a5\u56de\u7b54\uff0c\u9700\u8981\u65f6\u518d\u8c03\u7528\u5de5\u5177\u6216\u8fdb\u5165\u6267\u884c\u6d41\u7a0b\u3002"}</p>
               </div>
               <div className="assistant-chat-sidebar-actions">
                 <button
@@ -882,12 +911,7 @@ export default function AssistantPage() {
                   {"\u5237\u65b0"}
                 </button>
               </div>
-            </div>
-
-            <div className="assistant-chat-sidebar-stats">
-              <div className="assistant-chat-stat"><span>{"\u5bf9\u8bdd"}</span><strong>{conversationsQuery.data?.length || 0}</strong></div>
-              <div className="assistant-chat-stat"><span>{"\u8fdb\u884c\u4e2d"}</span><strong>{runningConversationCount}</strong></div>
-              <div className="assistant-chat-stat"><span>{"\u5f85\u5ba1\u6279"}</span><strong>{waitingApprovals.length}</strong></div>
+              <p className="assistant-chat-sidebar-note">{sidebarSummary}</p>
             </div>
 
             <div className="assistant-chat-conversation-list">
@@ -931,7 +955,7 @@ export default function AssistantPage() {
                       <p>{conversationPreview(item)}</p>
                       <div className="assistant-chat-conversation-meta">
                         <span>{formatRelativeTime(item.updated_at || item.created_at)}</span>
-                        <span>{`${item.task_count} \u4e2a\u4efb\u52a1`}</span>
+                        {item.running_task_count > 0 ? <span>{"\u8fd8\u5728\u7ee7\u7eed"}</span> : null}
                       </div>
                     </div>
                   );
@@ -978,23 +1002,31 @@ export default function AssistantPage() {
                       <h2>{selectedConversationTitle}</h2>
                       <button type="button" className="assistant-link-button" disabled={!selectedConversationId || isStreaming} onClick={startRenamingConversation}>{"\u91cd\u547d\u540d"}</button>
                     </div>
-                    <p>{threadItems.length > 0 ? selectedConversationPreview : "\u5728\u4e0b\u65b9\u76f4\u63a5\u8f93\u5165\u95ee\u9898\uff0c\u6216\u7ee7\u7eed\u5f53\u524d\u5bf9\u8bdd\u3002"}</p>
+                    <p>{threadItems.length > 0 ? selectedConversationPreview : "\u5728\u4e0b\u65b9\u76f4\u63a5\u8f93\u5165\u95ee\u9898\u6216\u4efb\u52a1\u3002"}</p>
                   </>
                 )}
               </div>
               <div className="assistant-chat-main-actions">
                 {selectedTaskCard ? <StatusBadge status={selectedTaskCard.status} /> : null}
-                {selectedTaskCard?.chat_state ? <span className="assistant-chip">{selectedTaskCard.chat_state}</span> : null}
-                {!creatingNewConversation && selectedConversationId ? <button type="button" className="btn btn-ghost" disabled={deleteConversationMutation.isPending || isStreaming} onClick={() => requestDeleteConversation(selectedConversationId)}>{"\u5220\u9664\u4f1a\u8bdd"}</button> : null}
-                <button type="button" className="btn btn-ghost" onClick={() => setShowDetails((value) => !value)}>{showDetails ? "\u9690\u85cf\u8fd0\u884c\u7ec6\u8282" : "\u67e5\u770b\u8fd0\u884c\u7ec6\u8282"}</button>
+                {selectedTaskCard?.chat_state ? (
+                  <span className="assistant-chip subtle">
+                    {selectedTaskCard.chat_state === "\u7b49\u5f85\u786e\u8ba4" ? waitingStatusLabel : selectedTaskCard.chat_state}
+                  </span>
+                ) : null}
+                {selectedTaskCard ? (
+                  <button type="button" className="btn btn-ghost" onClick={() => setShowDetails((value) => !value)}>
+                    {showDetails ? "\u6536\u8d77\u8fd0\u884c\u4fe1\u606f" : "\u67e5\u770b\u8fd0\u884c\u4fe1\u606f"}
+                  </button>
+                ) : null}
+                {!creatingNewConversation && selectedConversationId ? <button type="button" className="assistant-link-button assistant-link-button-danger" disabled={deleteConversationMutation.isPending || isStreaming} onClick={() => requestDeleteConversation(selectedConversationId)}>{"\u5220\u9664\u4f1a\u8bdd"}</button> : null}
               </div>
             </header>
 
             {waitingApprovals.length > 0 ? (
               <div className="assistant-chat-banner">
                 <div>
-                  <strong>{"\u8fd9\u8f6e\u6267\u884c\u6b63\u5728\u7b49\u5f85\u786e\u8ba4"}</strong>
-                  <p>{waitingApprovals[0].action_hint || "\u786e\u8ba4\u540e\u6211\u4f1a\u7ee7\u7eed\u5b8c\u6210\u5269\u4f59\u6b65\u9aa4\u3002"}</p>
+                  <strong>{waitingBannerTitle}</strong>
+                  <p>{waitingApprovalMessage}</p>
                 </div>
                 {isOperator ? (
                   <div className="inline-actions">
@@ -1053,20 +1085,19 @@ export default function AssistantPage() {
                         <div className="assistant-chat-bubble-head">
                           <span>{isAssistant ? "xh-helper" : "\u4f60"}</span>
                           <span>{formatRelativeTime(item.createdAt)}</span>
-                          {isAssistant && routeBadgeLabel(item.turn.route) ? <span>{routeBadgeLabel(item.turn.route)}</span> : null}
                         </div>
                         <div className="assistant-chat-bubble-body">
                           {renderMessageContent(message, item.id)}
                           {isAssistant && item.turn.turn_id === streamingDraft?.turnId && streamingText !== (streamingDraft?.assistantMessage || "") ? <span className="assistant-chat-streaming-cursor" aria-hidden="true" /> : null}
                         </div>
-                        {isAssistant && taskCard ? (
+                        {isAssistant && taskCard && taskCard.status !== "SUCCEEDED" ? (
                           <div className="assistant-chat-inline-task">
                             <div className="assistant-chat-inline-task-head">
-                              <span>{taskCard.chat_state || taskCard.status_label}</span>
-                              <span>{taskCard.current_step || phaseLabel(item.turn.current_phase)}</span>
+                              <span>
+                                {taskCard.chat_state === "\u7b49\u5f85\u786e\u8ba4" ? waitingStatusLabel : taskCard.chat_state || taskCard.status_label}
+                              </span>
                             </div>
                             <p>{detailSummary(trace, taskCard)}</p>
-                            {trace?.next_step_hint || taskCard.next_action ? <span className="assistant-chip subtle">{trace?.next_step_hint || taskCard.next_action}</span> : null}
                           </div>
                         ) : null}
                         {!isAssistant ? (
@@ -1086,41 +1117,50 @@ export default function AssistantPage() {
               <section className="assistant-chat-details">
                 <div className="assistant-chat-details-grid">
                   <div className="sub-panel stack-gap-xs">
-                    <p className="panel-subtitle">{"\u5f53\u524d\u8fd9\u8f6e"}</p>
-                    <div className="assistant-chat-detail-row"><span>{routeLabel(selectedTurn.route)}</span><span>{selectedTurn.display_state || selectedTaskCard?.chat_state || "\u5df2\u54cd\u5e94"}</span></div>
+                    <p className="panel-subtitle">{"\u5f53\u524d\u72b6\u6001"}</p>
+                    <div className="assistant-chat-detail-row">
+                      <span>
+                        {(selectedTurn.display_state || selectedTaskCard?.chat_state || "\u5df2\u54cd\u5e94") === "\u7b49\u5f85\u786e\u8ba4"
+                          ? waitingStatusLabel
+                          : selectedTurn.display_state || selectedTaskCard?.chat_state || "\u5df2\u54cd\u5e94"}
+                      </span>
+                      <span>{formatDateTime(selectedTurn.updated_at || selectedTurn.created_at)}</span>
+                    </div>
                     <p>{selectedBubbleSummary}</p>
-                    <p className="muted-text">{selectedTaskCard?.current_step ? `\u5f53\u524d\u6b65\u9aa4\uff1a${selectedTaskCard.current_step}` : `\u5f53\u524d\u9636\u6bb5\uff1a${phaseLabel(selectedTurn.current_phase)}`}</p>
-                    <p className="muted-text">{`\u6700\u540e\u66f4\u65b0\u65f6\u95f4\uff1a${formatDateTime(selectedTurn.updated_at || selectedTurn.created_at)}`}</p>
+                    {selectedTaskCard?.current_step ? <p className="muted-text">{`\u5f53\u524d\u6b65\u9aa4\uff1a${selectedTaskCard.current_step}`}</p> : null}
+                    {selectedNextStepHint ? <p className="muted-text">{`\u4e0b\u4e00\u6b65\uff1a${selectedNextStepHint}`}</p> : null}
                   </div>
                   <div className="sub-panel stack-gap-xs">
-                    <p className="panel-subtitle">{"\u5de5\u5177\u4e0e\u5ba1\u6279"}</p>
+                    <p className="panel-subtitle">{"\u5de5\u5177\u4e0e\u786e\u8ba4"}</p>
                     {traceQuery.data?.tool_calls?.length ? traceQuery.data.tool_calls.slice(-3).map((item) => (
                       <div key={item.tool_call_id} className="assistant-chat-detail-card">
                         <div className="assistant-chat-detail-row"><strong>{item.tool_name}</strong><span>{item.status_label}</span></div>
                         {item.response_summary ? <p>{normalizeText(item.response_summary, 140)}</p> : null}
                       </div>
                     )) : <p className="muted-text">{"\u8fd9\u4e00\u8f6e\u6ca1\u6709\u660e\u663e\u7684\u5de5\u5177\u6d3b\u52a8\u3002"}</p>}
-                    {waitingApprovals.length ? <div className="assistant-chat-detail-card"><strong>{"\u5f85\u786e\u8ba4"}</strong><p>{waitingApprovals[0].reason || waitingApprovals[0].action_hint || "\u6267\u884c\u88ab\u6682\u505c\uff0c\u7b49\u5f85\u4eba\u5de5\u786e\u8ba4\u3002"}</p></div> : null}
+                    {waitingApprovals.length ? <div className="assistant-chat-detail-card"><strong>{waitingStatusLabel}</strong><p>{waitingApprovalMessage || "\u6267\u884c\u88ab\u6682\u505c\uff0c\u7b49\u5f85\u6709\u6743\u9650\u7684\u64cd\u4f5c\u5458\u786e\u8ba4\u3002"}</p></div> : null}
                   </div>
-                  <div className="sub-panel stack-gap-xs">
-                    <p className="panel-subtitle">{"\u6267\u884c\u6b65\u9aa4"}</p>
-                    {runtimeSteps.length ? runtimeSteps.slice(-5).map((step) => (
-                      <div key={step.key} className="assistant-chat-detail-card">
-                        <div className="assistant-chat-detail-row"><strong>{step.title}</strong><span>{phaseLabel(step.phase)}</span></div>
-                        <p>{normalizeText(step.summary, 160)}</p>
-                      </div>
-                    )) : <p className="muted-text">{"\u5f53\u524d\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u8fd0\u884c\u6b65\u9aa4\u3002"}</p>}
-                  </div>
-                  <div className="sub-panel stack-gap-xs">
-                    <p className="panel-subtitle">{"\u539f\u59cb\u8c03\u8bd5\u89c6\u56fe"}</p>
-                    <details className="assistant-chat-debug-details">
-                      <summary>{"\u67e5\u770b planner / final output / debugger"}</summary>
+                </div>
+                <details className="assistant-chat-debug-details">
+                  <summary>{"\u67e5\u770b\u8be6\u7ec6\u8fd0\u884c\u8bb0\u5f55"}</summary>
+                  <div className="assistant-chat-details-grid assistant-chat-details-grid-advanced">
+                    <div className="sub-panel stack-gap-xs">
+                      <p className="panel-subtitle">{"\u6267\u884c\u6b65\u9aa4"}</p>
+                      {runtimeSteps.length ? runtimeSteps.slice(-5).map((step, index) => (
+                        <div key={`${step.key}-${index}`} className="assistant-chat-detail-card">
+                          <div className="assistant-chat-detail-row"><strong>{step.title}</strong><span>{phaseLabel(step.phase)}</span></div>
+                          <p>{normalizeText(step.summary, 160)}</p>
+                        </div>
+                      )) : <p className="muted-text">{"\u5f53\u524d\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u8fd0\u884c\u6b65\u9aa4\u3002"}</p>}
+                    </div>
+                    <div className="sub-panel stack-gap-xs">
+                      <p className="panel-subtitle">{"\u539f\u59cb\u8c03\u8bd5\u89c6\u56fe"}</p>
                       <JsonViewer value={traceQuery.data?.planner || selectedTurn.agent_run.planner || {}} title="planner" />
                       <JsonViewer value={traceQuery.data?.final_output || selectedTurn.agent_run.final_output || {}} title="final output" />
                       <JsonViewer value={traceQuery.data?.runtime_debugger || {}} title="runtime debugger" />
-                    </details>
+                    </div>
                   </div>
-                </div>
+                </details>
               </section>
             ) : null}
 
@@ -1148,11 +1188,9 @@ export default function AssistantPage() {
                   onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); handleSend(false); } }}
                 />
                 <div className="assistant-chat-composer-footer">
-                  <div className="assistant-chat-composer-hint">
-                    {pendingConfirmMessage ? "\u4e0a\u4e00\u6761\u8bf7\u6c42\u9700\u8981\u4f60\u786e\u8ba4\u540e\u518d\u7ee7\u7eed\u3002" : "\u9ed8\u8ba4\u4f1a\u5148\u76f4\u63a5\u56de\u7b54\uff1b\u5982\u679c\u4efb\u52a1\u66f4\u590d\u6742\uff0c\u7cfb\u7edf\u4f1a\u81ea\u52a8\u8f6c\u6210\u5de5\u5177\u8c03\u7528\u6216\u6301\u7eed\u6267\u884c\u3002"}
-                  </div>
+                  <div className="assistant-chat-composer-hint">{pendingConfirmHint}</div>
                   <div className="inline-actions">
-                    {pendingConfirmMessage ? <button type="button" className="btn btn-ghost" disabled={sendMutation.isPending || isStreaming} onClick={() => handleSend(true)}>{"\u786e\u8ba4\u5e76\u7ee7\u7eed"}</button> : null}
+                    {pendingConfirmMessage ? <button type="button" className="btn btn-ghost" disabled={sendMutation.isPending || isStreaming} onClick={() => handleSend(true)}>{pendingConfirmButtonLabel}</button> : null}
                     {isStreaming ? (
                       <button type="button" className="btn btn-danger" onClick={handleStopStreaming}>{"\u505c\u6b62\u751f\u6210"}</button>
                     ) : (

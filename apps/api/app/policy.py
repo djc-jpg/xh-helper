@@ -33,9 +33,47 @@ def check_tool_policy(
 ) -> tuple[bool, str]:
     env = environment or settings.environment
     role = user["role"]
+    approval_binding: dict[str, Any] | None = None
+    approval_status = ""
+    approver_role = ""
+    approved_write_delegation = False
+
+    if approval_id:
+        if not task_id or not run_id:
+            return False, "approval_context_invalid"
+        approval_binding = fetchone(
+            """
+            SELECT
+              a.id,
+              a.status,
+              COALESCE(u.role::text, '') AS approver_role
+            FROM approvals a
+            LEFT JOIN users u
+              ON u.tenant_id = a.tenant_id
+             AND u.id = a.decided_by
+            WHERE a.tenant_id = %s
+              AND a.id = %s
+              AND a.task_id = %s
+              AND a.run_id = %s
+            """,
+            (user["tenant_id"], approval_id, task_id, run_id),
+        )
+        if approval_binding:
+            approval_status = str(approval_binding.get("status") or "")
+            approver_role = str(approval_binding.get("approver_role") or "")
 
     if is_write_action and not has_min_role(role, "operator"):
-        return False, "write_requires_operator"
+        if not approval_id:
+            return False, "write_requires_operator"
+        if not approval_binding:
+            return False, "approval_invalid"
+        if approval_status not in {"APPROVED", "EDITED"}:
+            return False, "approval_not_approved"
+        if not has_min_role(approver_role, "operator"):
+            return False, "write_requires_operator"
+        approved_write_delegation = True
+
+    policy_role = approver_role if approved_write_delegation else role
 
     policies = fetchall(
         """
@@ -56,6 +94,8 @@ def check_tool_policy(
         # deny policies are exact-role to avoid over-blocking higher roles
         if role != pol["role_min"]:
             continue
+        if approved_write_delegation and pol["is_write_action"] and pol["requires_approval"]:
+            continue
         if not pol["is_write_action"] or is_write_action:
             return False, "policy_deny"
 
@@ -64,7 +104,7 @@ def check_tool_policy(
     for pol in policies:
         if pol["effect"] != "allow":
             continue
-        if not has_min_role(role, pol["role_min"]):
+        if not has_min_role(policy_role, pol["role_min"]):
             continue
         if pol["is_write_action"] and not is_write_action:
             continue
@@ -77,22 +117,10 @@ def check_tool_policy(
     if requires_approval:
         if not approval_id:
             return False, "write_requires_approval"
-        if not task_id or not run_id:
-            return False, "approval_context_invalid"
-        approval = fetchone(
-            """
-            SELECT id, status
-            FROM approvals
-            WHERE tenant_id = %s
-              AND id = %s
-              AND task_id = %s
-              AND run_id = %s
-            """,
-            (user["tenant_id"], approval_id, task_id, run_id),
-        )
+        approval = approval_binding
         if not approval:
             return False, "approval_invalid"
-        if str(approval["status"]) not in {"APPROVED", "EDITED"}:
+        if approval_status not in {"APPROVED", "EDITED"}:
             return False, "approval_not_approved"
 
     if allowed or role == "owner":

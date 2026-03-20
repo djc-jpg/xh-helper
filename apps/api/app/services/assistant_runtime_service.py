@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -18,6 +19,39 @@ def _as_list(value: Any) -> list[Any]:
 def _optional_dict(value: Any) -> dict[str, Any] | None:
     parsed = _as_dict(value)
     return parsed or None
+
+
+def _step_key_from_title(title: str, index: int) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", title.strip().lower()).strip("_")
+    return normalized or f"runtime_step_{index + 1}"
+
+
+def _normalize_runtime_steps(value: Any) -> list[dict[str, Any]]:
+    normalized_steps: list[dict[str, Any]] = []
+    for index, raw_step in enumerate(_as_list(value)):
+        step = _as_dict(raw_step)
+        if not step:
+            continue
+        title = str(step.get("title") or f"Runtime Step {index + 1}")
+        summary = str(step.get("summary") or title)
+        phase = str(step.get("phase") or "runtime")
+        status = str(step.get("status") or "completed")
+        normalized_steps.append(
+            {
+                "key": str(step.get("key") or _step_key_from_title(title, index)),
+                "phase": phase,
+                "title": title,
+                "status": status,
+                "summary": summary,
+                "created_at": step.get("created_at"),
+                "observation": _optional_dict(step.get("observation")),
+                "decision": _optional_dict(step.get("decision")),
+                "reflection": _optional_dict(step.get("reflection")),
+                "state_before": _as_dict(step.get("state_before")),
+                "state_after": _as_dict(step.get("state_after")),
+            }
+        )
+    return normalized_steps
 
 
 def build_agent_run(turn: dict[str, Any], task_card: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -49,7 +83,7 @@ def build_agent_run(turn: dict[str, Any], task_card: dict[str, Any] | None = Non
         "observations": _as_list(runtime.get("observations")),
         "decision": runtime.get("decision"),
         "reflection": _optional_dict(runtime.get("reflection")),
-        "steps": _as_list(runtime.get("steps")),
+        "steps": _normalize_runtime_steps(runtime.get("steps")),
         "final_output": final_output,
     }
 

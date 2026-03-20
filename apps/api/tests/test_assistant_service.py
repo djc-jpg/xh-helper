@@ -600,7 +600,9 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("wait", result["turn"]["agent_run"]["current_action"]["action_type"])
         self.assertTrue(result["turn"]["agent_run"]["policy"]["approval_triggered"])
         self.assertIn("\u9ad8\u98ce\u9669\u64cd\u4f5c", result["message"])
+        self.assertIn("\u64cd\u4f5c\u5458", result["message"])
         self.assertNotIn("email_ticketing", result["message"])
+        self.assertNotIn("\u4f60\u786e\u8ba4\u540e", result["message"])
 
     async def test_confirmed_high_risk_tool_routes_to_workflow(self) -> None:
         self.tool_repo.tools = [

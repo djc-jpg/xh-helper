@@ -17,8 +17,7 @@ function resolveWorkspaceCopy(pathname: string): { title: string; subtitle: stri
   if (pathname.startsWith("/assistant")) {
     return {
       title: "\u0041\u0049 \u52a9\u624b",
-      subtitle:
-        "\u50cf\u7528 ChatGPT \u4e00\u6837\u804a\u5929\uff0c\u9700\u8981\u65f6\u518d\u5207\u5230\u5de5\u5177\u3001\u4efb\u52a1\u548c\u6267\u884c\u7ec6\u8282"
+      subtitle: "\u76f4\u63a5\u8f93\u5165\u95ee\u9898\u6216\u4efb\u52a1\uff0c\u9700\u8981\u65f6\u518d\u6253\u5f00\u8fd0\u884c\u4fe1\u606f\u3002"
     };
   }
   if (pathname === "/") {
@@ -74,6 +73,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme } = useTheme();
   const { language, setLanguage } = useLocale();
   const workspaceCopy = resolveWorkspaceCopy(pathname);
+  const isAssistantWorkspace = pathname.startsWith("/assistant");
 
   useEffect(() => {
     if (!auth.ready || auth.isAuthenticated || !auth.sessionHint) {
@@ -95,14 +95,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell">
+    <div className={isAssistantWorkspace ? "app-shell app-shell-assistant-focus" : "app-shell"}>
       <aside className="app-sidebar">
         <div className="app-sidebar-top">
           <Link href="/" className="app-brand">
             <span className="app-brand-mark">xh</span>
             <div className="stack-gap-xs">
               <span className="app-brand-title">xh-helper</span>
-              <span className="app-brand-subtitle">{"\u901a\u7528\u667a\u80fd\u4f53\u8fd0\u884c\u65f6"}</span>
+              <span className="app-brand-subtitle">
+                {isAssistantWorkspace ? "\u804a\u5929\u4e3a\u4e3b\uff0c\u9700\u65f6\u518d\u6267\u884c" : "\u901a\u7528\u667a\u80fd\u4f53\u8fd0\u884c\u65f6"}
+              </span>
             </div>
           </Link>
 
@@ -111,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <SidebarNav />
+        <SidebarNav compact={isAssistantWorkspace} />
 
         <div className="app-sidebar-footer">
           <div className="user-chip app-user-chip">
@@ -153,7 +155,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="app-main">
         <header className="app-topbar">
           <div className="app-topbar-copy">
-            <span className="app-topbar-kicker">xh-helper</span>
+            {isAssistantWorkspace ? null : <span className="app-topbar-kicker">xh-helper</span>}
             <h1 className="app-topbar-title">{workspaceCopy.title}</h1>
             <p className="app-topbar-subtitle">{workspaceCopy.subtitle}</p>
           </div>

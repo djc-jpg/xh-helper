@@ -18,9 +18,9 @@ class AssistantExperienceServiceTests(unittest.TestCase):
         )
 
         self.assertEqual("等待确认", card["chat_state"])
-        self.assertEqual("等待你的确认", card["waiting_for"])
-        self.assertIn("这一步需要你确认后我再继续", card["progress_message"])
-        self.assertIn("确认后我会自动继续处理", card["assistant_summary"])
+        self.assertEqual("等待人工确认", card["waiting_for"])
+        self.assertIn("这一步正在等待人工确认", card["progress_message"])
+        self.assertIn("当前在等待人工确认", card["assistant_summary"])
 
     def test_failed_task_card_maps_error_code_into_human_copy(self) -> None:
         card = build_task_card(
@@ -56,7 +56,7 @@ class AssistantExperienceServiceTests(unittest.TestCase):
         )
 
         self.assertEqual("帮我继续处理", summary["title"])
-        self.assertEqual("这条对话里有任务正在等你确认。", summary["preview"])
+        self.assertEqual("这条对话里有任务正在等待人工确认。", summary["preview"])
 
 
 if __name__ == "__main__":
