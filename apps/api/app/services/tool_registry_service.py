@@ -6,10 +6,44 @@ from typing import Any
 from ..repositories import ToolRepository
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9_]{2,}")
+CHINESE_TOOL_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...], float], ...] = (
+    (
+        ("\u5de5\u5355", "\u53d1\u5de5\u5355", "\u503c\u73ed", "\u90ae\u4ef6", "\u53d1\u90ae\u4ef6"),
+        ("email_ticketing", "ticket", "email"),
+        4.0,
+    ),
+    (
+        ("\u641c\u7d22", "\u67e5\u627e", "\u67e5\u8be2", "\u6587\u6863", "\u8d44\u6599"),
+        ("web_search", "search"),
+        3.0,
+    ),
+)
 
 
 def _tokenize(text: str) -> list[str]:
     return TOKEN_PATTERN.findall(text.lower())
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _chinese_hint_score(message: str, tool: dict[str, Any]) -> float:
+    if not _contains_cjk(message):
+        return 0.0
+    lowered_message = message.lower()
+    tool_bag = " ".join(
+        [
+            str(tool.get("tool_name") or ""),
+            str(tool.get("description") or ""),
+            " ".join(str(x) for x in list(tool.get("supported_use_cases") or [])),
+        ]
+    ).lower()
+    score = 0.0
+    for message_markers, tool_markers, bonus in CHINESE_TOOL_HINTS:
+        if any(marker in lowered_message for marker in message_markers) and any(marker in tool_bag for marker in tool_markers):
+            score += bonus
+    return score
 
 
 def _tool_score(message_tokens: list[str], tool: dict[str, Any]) -> float:
@@ -84,7 +118,9 @@ class ToolRegistryService:
         message_tokens = _tokenize(message)
         scored: list[tuple[float, dict[str, Any]]] = []
         for tool in tools:
-            scored.append((_tool_score(message_tokens, tool), tool))
+            score = _tool_score(message_tokens, tool)
+            score += _chinese_hint_score(message, tool)
+            scored.append((score, tool))
         scored.sort(key=lambda item: item[0], reverse=True)
         candidates = [tool for score, tool in scored if score > 0]
         return candidates[: max(1, int(limit))]

@@ -402,6 +402,37 @@ class RuntimePolicyEngineTests(unittest.TestCase):
         self.assertEqual("tool_call", action["action_type"])
         self.assertEqual(1, policy["selected_tool_memory"]["failures"])
 
+    def test_choose_next_action_keeps_low_risk_tool_request_on_fast_path_despite_workflow_history(self) -> None:
+        action, policy = choose_next_action(
+            goal={"normalized_goal": "请帮我搜索 workflow 文档", "unknowns": [], "risk_level": "low"},
+            planner={
+                "action": "use_tool",
+                "selected_tool": "web_search",
+                "policy_signals": {
+                    "action_signal": "tool_call",
+                    "action_affinities": {"tool_call": 0.68, "workflow_call": 0.2},
+                },
+                "intent": "knowledge_lookup",
+            },
+            task_state={"available_actions": ["tool_call", "workflow_call", "respond"]},
+            retrieval_hits=[],
+            tool_candidates=[{"tool_name": "web_search", "requires_approval": False, "risk_level": "low"}],
+            confirmed=False,
+            episodes=[
+                {
+                    "episode_id": "ep-workflow",
+                    "chosen_strategy": "workflow_call",
+                    "outcome_status": "SUCCEEDED",
+                }
+            ],
+            has_retrieval_observation=False,
+            latest_result=None,
+            requested_mode="auto",
+        )
+
+        self.assertEqual("tool_call", action["action_type"])
+        self.assertEqual("tool_call", policy["selected_action"])
+
     def test_score_goal_portfolio_entry_boosts_dynamic_stalled_goal(self) -> None:
         portfolio = score_goal_portfolio_entry(
             {

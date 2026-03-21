@@ -245,10 +245,39 @@ def _failure_reason(task: dict[str, Any]) -> str | None:
     return FAILURE_REASON_LABELS["unknown_error"]
 
 
+def _extract_output_preview(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = " ".join(value.split())
+        return text or None
+    if isinstance(value, dict):
+        if not value:
+            return None
+        for key in ("message", "summary", "preview", "result", "output", "content", "text"):
+            candidate = _extract_output_preview(value.get(key))
+            if candidate:
+                return candidate
+        if len(value) == 1:
+            return _extract_output_preview(next(iter(value.values())))
+        summary = str(summarize_payload(value, max_len=220).get("summary") or "").strip()
+        if summary in {"{}", "[]"}:
+            return None
+        return summary or None
+    if isinstance(value, list):
+        if not value:
+            return None
+        for item in value:
+            candidate = _extract_output_preview(item)
+            if candidate:
+                return candidate
+    return None
+
+
 def _result_preview(task: dict[str, Any]) -> str | None:
     output = _as_dict(task.get("output_masked"))
     if output:
-        return str(summarize_payload(output, max_len=220).get("summary") or "")
+        preview = _extract_output_preview(output)
+        if preview:
+            return preview
     if str(task.get("status") or "") == "SUCCEEDED":
         return "这次处理已经完成，你可以展开查看详情。"
     return None

@@ -81,7 +81,7 @@ class PlannerServiceTests(unittest.TestCase):
 
     def test_chinese_explanatory_question_stays_in_answer_path(self) -> None:
         plan = self.planner.plan(
-            message="这个 workflow runtime 是怎么工作的？",
+            message="\u8fd9\u4e2a workflow runtime \u662f\u600e\u4e48\u5de5\u4f5c\u7684\uff1f",
             mode=None,
             metadata={},
             history=[],
@@ -93,6 +93,36 @@ class PlannerServiceTests(unittest.TestCase):
         self.assertEqual("general_qna", plan["intent"])
         self.assertLess(plan["policy_signals"]["action_affinities"]["workflow_call"], 0.5)
         self.assertGreaterEqual(plan["policy_signals"]["action_affinities"]["retrieve"], 0.8)
+
+    def test_chinese_high_risk_request_requires_approval(self) -> None:
+        plan = self.planner.plan(
+            message="\u8bf7\u5e2e\u6211\u7ed9\u503c\u73ed\u56e2\u961f\u53d1\u5de5\u5355",
+            mode=None,
+            metadata={},
+            history=[],
+            memory={},
+            retrieval_hits=[],
+            tool_candidates=[self.high_risk_tool],
+        )
+        self.assertEqual("need_approval", plan["action"])
+        self.assertTrue(plan["need_confirmation"])
+        self.assertEqual("ticket_email", plan["task_type"])
+        self.assertEqual("task_execution", plan["intent"])
+
+    def test_chinese_search_keeps_tool_affinity_above_workflow(self) -> None:
+        plan = self.planner.plan(
+            message="\u8bf7\u5e2e\u6211\u641c\u7d22 workflow \u6587\u6863",
+            mode=None,
+            metadata={},
+            history=[],
+            memory={},
+            retrieval_hits=[{"title": "runtime", "snippet": "..."}],
+            tool_candidates=[self.low_risk_tool],
+        )
+        self.assertEqual("use_tool", plan["action"])
+        self.assertEqual("knowledge_lookup", plan["intent"])
+        self.assertGreaterEqual(plan["policy_signals"]["action_affinities"]["tool_call"], 0.68)
+        self.assertLess(plan["policy_signals"]["action_affinities"]["workflow_call"], 0.68)
 
     def test_chinese_continue_followup_routes_to_workflow(self) -> None:
         plan = self.planner.plan(

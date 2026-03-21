@@ -345,6 +345,26 @@ def _tool_failure_user_message(reason_code: str) -> str:
     return TOOL_FAILURE_USER_MESSAGES.get(normalized, TOOL_FAILURE_USER_MESSAGES["unknown_error"])
 
 
+def _should_keep_retryable_tool_failure_inline(
+    *,
+    req: AssistantChatRequest,
+    plan: dict[str, Any],
+    current_action: dict[str, Any],
+    selected_tool_name: str,
+) -> bool:
+    requested_mode = str(req.mode or "auto").strip().lower()
+    if requested_mode in {"tool_task", "workflow_task"}:
+        return False
+    if str(current_action.get("action_type") or "") != "tool_call":
+        return False
+    if bool(current_action.get("requires_approval")):
+        return False
+    intent = str(plan.get("intent") or "").strip().lower()
+    task_type = str(plan.get("task_type") or "").strip().lower()
+    selected_tool = str(selected_tool_name or plan.get("selected_tool") or "").strip().lower()
+    return intent == "knowledge_lookup" and task_type == "rag_qa" and selected_tool == "web_search"
+
+
 def _repo_reference_fallback_in_chinese(title: str, snippet: str) -> str:
     text = f"{title} {snippet}".lower()
     has_temporal = "temporal" in text
@@ -2083,9 +2103,18 @@ async def orchestrate_assistant_chat(
         failure_reflection = dict(failure_runtime.get("reflection") or {})
         failed_action = dict(failure_runtime.get("current_action") or current_action)
         failed_policy = dict(failure_runtime.get("policy") or policy)
-        if failure_status == "FAILED_RETRYABLE" and (
+        if (
+            failure_status == "FAILED_RETRYABLE"
+            and not _should_keep_retryable_tool_failure_inline(
+                req=req,
+                plan=plan,
+                current_action=current_action,
+                selected_tool_name=selected_tool_name,
+            )
+            and (
             str(failure_reflection.get("next_action") or "") == "workflow_call"
             or str(failed_policy.get("fallback_action") or "") == "workflow_call"
+            )
         ):
             escalation_steps = steps + [
                 _runtime_step(

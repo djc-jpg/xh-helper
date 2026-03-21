@@ -11,6 +11,58 @@ COMPLEX_HINTS = {"workflow", "research", "report", "summarize", "analysis", "tic
 TOOL_HINTS = {"search", "find", "lookup", "record", "api", "tool"}
 QUESTION_HINTS = {"what", "why", "how", "when", "where", "which", "who"}
 HIGH_RISK_HINTS = {"send", "email", "ticket", "delete", "write", "update", "create"}
+CHINESE_TOOL_MARKERS = ("\u641c\u7d22", "\u67e5\u627e", "\u67e5\u8be2", "\u8c03\u7528\u5de5\u5177", "\u8c03\u7528")
+CHINESE_HIGH_RISK_MARKERS = (
+    "\u53d1\u5de5\u5355",
+    "\u63d0\u4ea4\u5de5\u5355",
+    "\u53d1\u9001\u90ae\u4ef6",
+    "\u5199\u5165",
+    "\u66f4\u65b0",
+    "\u521b\u5efa",
+    "\u5220\u9664",
+    "\u5199",
+    "\u53d1\u9001",
+)
+CHINESE_DURABLE_MARKERS = (
+    "\u6301\u7eed\u6267\u884c",
+    "\u6301\u7eed\u8ddf\u8fdb",
+    "\u7ee7\u7eed\u8ddf\u8fdb",
+    "\u7ee7\u7eed\u63a8\u8fdb",
+    "\u4e00\u76f4\u8ddf\u8fdb",
+    "\u76f4\u5230\u6709\u7ed3\u679c",
+    "\u53d1\u8d77\u4e00\u4e2a\u6301\u7eed\u6267\u884c\u4efb\u52a1",
+    "\u53d1\u8d77\u6301\u7eed\u6267\u884c\u4efb\u52a1",
+)
+CHINESE_EXPLANATORY_PREFIXES = (
+    "\u600e\u4e48",
+    "\u5982\u4f55",
+    "\u4e3a\u4ec0\u4e48",
+    "\u8bf7\u89e3\u91ca",
+    "\u89e3\u91ca\u4e00\u4e0b",
+    "\u89e3\u91ca\u4e0b",
+    "\u4ecb\u7ecd\u4e00\u4e0b",
+    "\u4ecb\u7ecd\u4e0b",
+    "\u4ec0\u4e48\u662f",
+)
+CHINESE_EXPLANATORY_MARKERS = (
+    "\u662f\u600e\u4e48",
+    "\u5982\u4f55",
+    "\u4e3a\u4ec0\u4e48",
+    "\u5de5\u4f5c\u539f\u7406",
+    "\u539f\u7406",
+    "\u4ec0\u4e48\u610f\u601d",
+    "\u600e\u4e48\u5de5\u4f5c",
+)
+CHINESE_HELP_MARKERS = ("\u4f60\u597d", "\u5e2e\u6211", "\u5e2e\u52a9")
+CHINESE_LOOKUP_MARKERS = ("\u641c\u7d22", "\u67e5\u627e", "\u67e5\u8be2")
+CHINESE_TASK_MARKERS = (
+    "\u5de5\u5355",
+    "\u90ae\u4ef6",
+    "\u5de5\u4f5c\u6d41",
+    "\u62a5\u544a",
+    "\u7ee7\u7eed\u8ddf\u8fdb",
+    "\u6301\u7eed\u6267\u884c",
+)
 ALLOWED_ACTIONS = {"answer_only", "use_tool", "use_retrieval", "start_workflow", "need_approval"}
 ALLOWED_TASK_TYPES = {"rag_qa", "tool_flow", "ticket_email", "research_summary"}
 LEGACY_ACTION_TO_RUNTIME_ACTION = {
@@ -126,7 +178,12 @@ class PlannerService:
             )
 
         need_confirmation = action == "need_approval"
-        confidence = self._confidence(action=action, normalized=normalized, retrieval_hits=retrieval_hits, tool_candidates=tool_candidates)
+        confidence = self._confidence(
+            action=action,
+            normalized=normalized,
+            retrieval_hits=retrieval_hits,
+            tool_candidates=tool_candidates,
+        )
         plan_steps = self._plan_steps(
             action=action,
             retrieval_hits=retrieval_hits,
@@ -281,52 +338,49 @@ class PlannerService:
         top_tool_requires_approval: bool,
         confirmed: bool,
     ) -> str:
-        durable_markers = (
-            "持续执行",
-            "持续跟进",
-            "继续跟进",
-            "继续推进",
-            "一直跟进",
-            "直到有结果",
-            "发起一个持续执行任务",
-            "发起持续执行任务",
-        )
-        if top_tool_requires_approval and self._has_any(normalized, HIGH_RISK_HINTS) and not confirmed:
+        if top_tool_requires_approval and self._is_high_risk_request(normalized) and not confirmed:
             return "need_approval"
-        if any(marker in normalized for marker in durable_markers):
+        if self._contains_any_phrase(normalized, CHINESE_DURABLE_MARKERS):
             return "start_workflow"
         if self._is_explanatory_question(normalized):
             return "use_retrieval" if retrieval_hits else "answer_only"
         if retrieval_hits and self._is_question_like(normalized):
             return "use_retrieval"
-        if tool_candidates and self._has_any(normalized, TOOL_HINTS):
+        if tool_candidates and (
+            self._has_any(normalized, TOOL_HINTS) or self._contains_any_phrase(normalized, CHINESE_TOOL_MARKERS)
+        ):
             return "use_tool"
         if self._has_any(normalized, COMPLEX_HINTS):
             return "start_workflow"
         return "answer_only"
 
     def _task_type(self, normalized: str) -> str:
-        if "ticket" in normalized or "email" in normalized:
+        if "ticket" in normalized or "email" in normalized or self._contains_any_phrase(normalized, ("\u5de5\u5355", "\u90ae\u4ef6")):
             return "ticket_email"
-        if "research" in normalized or "summary" in normalized or "report" in normalized:
+        if (
+            "research" in normalized
+            or "summary" in normalized
+            or "report" in normalized
+            or self._contains_any_phrase(normalized, ("\u7814\u7a76", "\u603b\u7ed3", "\u62a5\u544a"))
+        ):
             return "research_summary"
-        if "tool flow" in normalized or "api" in normalized:
+        if "tool flow" in normalized or "api" in normalized or self._contains_any_phrase(normalized, ("\u5de5\u5177\u6d41", "\u63a5\u53e3")):
             return "tool_flow"
         return "rag_qa"
 
     def _intent(self, normalized: str) -> str:
-        if self._has_any(normalized, {"hello", "hi", "help"}):
-            return "assistant_help"
         if self._is_explanatory_question(normalized):
             return "general_qna"
-        if self._has_any(normalized, {"search", "find", "lookup"}):
+        if self._has_any(normalized, {"search", "find", "lookup"}) or self._contains_any_phrase(normalized, CHINESE_LOOKUP_MARKERS):
             return "knowledge_lookup"
-        if self._has_any(normalized, {"ticket", "email", "workflow", "report"}):
+        if self._has_any(normalized, {"ticket", "email", "workflow", "report"}) or self._contains_any_phrase(normalized, CHINESE_TASK_MARKERS):
             return "task_execution"
+        if self._has_any(normalized, {"hello", "hi", "help"}) or self._contains_any_phrase(normalized, CHINESE_HELP_MARKERS):
+            return "assistant_help"
         return "general_qna"
 
     def _is_question_like(self, normalized: str) -> bool:
-        if "?" in normalized:
+        if "?" in normalized or "\uff1f" in normalized:
             return True
         return any(normalized.startswith(word + " ") for word in QUESTION_HINTS)
 
@@ -342,31 +396,11 @@ class PlannerService:
             "describe ",
             "walk me through ",
         )
-        chinese_starts = (
-            "怎么",
-            "如何",
-            "为什么",
-            "请解释",
-            "解释一下",
-            "解释下",
-            "介绍一下",
-            "介绍下",
-            "什么是",
-        )
-        chinese_markers = (
-            "是怎么",
-            "如何",
-            "为什么",
-            "工作原理",
-            "原理",
-            "什么意思",
-            "怎么工作",
-        )
         if any(normalized.startswith(prefix) for prefix in explanation_starts):
             return True
-        if any(normalized.startswith(prefix) for prefix in chinese_starts):
+        if any(normalized.startswith(prefix) for prefix in CHINESE_EXPLANATORY_PREFIXES):
             return True
-        return _contains_cjk(normalized) and any(marker in normalized for marker in chinese_markers)
+        return _contains_cjk(normalized) and self._contains_any_phrase(normalized, CHINESE_EXPLANATORY_MARKERS)
 
     def _has_any(self, normalized: str, hints: set[str]) -> bool:
         tokens = set(WORD_PATTERN.findall(normalized))
@@ -382,6 +416,12 @@ class PlannerService:
                 return True
         return False
 
+    def _contains_any_phrase(self, normalized: str, phrases: tuple[str, ...]) -> bool:
+        return any(phrase in normalized for phrase in phrases)
+
+    def _is_high_risk_request(self, normalized: str) -> bool:
+        return self._has_any(normalized, HIGH_RISK_HINTS) or self._contains_any_phrase(normalized, CHINESE_HIGH_RISK_MARKERS)
+
     def _confidence(
         self,
         *,
@@ -395,7 +435,9 @@ class PlannerService:
             score += 0.2
         if action == "use_retrieval" and retrieval_hits:
             score += 0.2
-        if action == "start_workflow" and self._has_any(normalized, COMPLEX_HINTS):
+        if action == "start_workflow" and (
+            self._has_any(normalized, COMPLEX_HINTS) or self._contains_any_phrase(normalized, CHINESE_DURABLE_MARKERS)
+        ):
             score += 0.15
         if action == "need_approval":
             score += 0.1
@@ -468,8 +510,10 @@ class PlannerService:
             action_affinities["retrieve"] = max(action_affinities["retrieve"], 0.72)
         if tool_candidates:
             action_affinities["tool_call"] = max(action_affinities["tool_call"], 0.68)
-        if not self._is_explanatory_question(normalized) and (
-            task_type in {"research_summary", "ticket_email"} or self._has_any(normalized, COMPLEX_HINTS)
+        if action != "use_tool" and not self._is_explanatory_question(normalized) and (
+            task_type in {"research_summary", "ticket_email"}
+            or self._has_any(normalized, COMPLEX_HINTS)
+            or self._contains_any_phrase(normalized, CHINESE_DURABLE_MARKERS)
         ):
             action_affinities["workflow_call"] = max(action_affinities["workflow_call"], 0.82)
         if self._is_question_like(normalized):

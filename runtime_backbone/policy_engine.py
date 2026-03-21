@@ -22,6 +22,26 @@ IN_PROGRESS_STATUSES = {"QUEUED", "VALIDATING", "PLANNING", "RUNNING", "WAITING_
 WAITING_STATUSES = {"WAITING_HUMAN", "WAITING_APPROVAL"}
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED_FINAL", "FAILED_RETRYABLE", "CANCELLED", "TIMED_OUT"}
 WORD_PATTERN = re.compile(r"[a-z0-9_]+")
+CHINESE_EXPLANATORY_PREFIXES = (
+    "\u600e\u4e48",
+    "\u5982\u4f55",
+    "\u4e3a\u4ec0\u4e48",
+    "\u8bf7\u89e3\u91ca",
+    "\u89e3\u91ca\u4e00\u4e0b",
+    "\u89e3\u91ca\u4e0b",
+    "\u4ecb\u7ecd\u4e00\u4e0b",
+    "\u4ecb\u7ecd\u4e0b",
+    "\u4ec0\u4e48\u662f",
+)
+CHINESE_EXPLANATORY_MARKERS = (
+    "\u662f\u600e\u4e48",
+    "\u5982\u4f55",
+    "\u4e3a\u4ec0\u4e48",
+    "\u5de5\u4f5c\u539f\u7406",
+    "\u539f\u7406",
+    "\u4ec0\u4e48\u610f\u601d",
+    "\u600e\u4e48\u5de5\u4f5c",
+)
 LEGACY_ACTION_TO_RUNTIME_ACTION = {
     "answer_only": "respond",
     "use_tool": "tool_call",
@@ -875,6 +895,17 @@ def choose_next_action(
         action_type = "workflow_call"
         reasons.append("recent episode memory shows the fast tool path keeps failing for this tool, so durable execution is safer")
         fallback_action = "respond"
+    elif (
+        planner_action == "use_tool"
+        and tool_candidates
+        and not top_requires_approval
+        and requested_mode != "workflow_task"
+        and top_risk == "low"
+        and tool_signal >= max(0.45, workflow_signal - 0.05)
+    ):
+        action_type = "tool_call"
+        reasons.append("planner selected a low-risk direct tool path and there is no strong stability signal forcing escalation")
+        fallback_action = "workflow_call" if "workflow_call" in available_actions else "respond"
     elif ask_user_signal >= 0.75 and has_ambiguous_reference:
         action_type = "ask_user"
         reasons.append("planner signal strongly prefers clarifying with the user before continuing")

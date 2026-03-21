@@ -1203,6 +1203,43 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("goal_continuity", workflow_req.input["runtime_state"]["policy"]["policy_selector"]["reason"])
         self.assertEqual("policy-active", self.goal_repo.rows["goal-policy-1"]["policy_version_id"])
 
+    async def test_retryable_tool_failure_stays_inline_for_auto_web_lookup(self) -> None:
+        failing_gateway = AsyncMock(
+            return_value={
+                "status": "FAILED",
+                "reason_code": "adapter_http_429",
+                "result": {"error": "rate limited"},
+            }
+        )
+        self.gateway.execute = failing_gateway
+        req = AssistantChatRequest(
+            user_id=self.user["id"],
+            conversation_id="conv-inline-retry",
+            message="\u8bf7\u5e2e\u6211\u641c\u7d22 workflow \u6587\u6863",
+            mode="auto",
+            metadata={},
+        )
+
+        result = await assistant_chat(
+            conversation_repo=self.conversation_repo,
+            episode_repo=self.episode_repo,
+            turn_repo=self.turn_repo,
+            task_repo=self.task_repo,
+            tool_repo=self.tool_repo,
+            gateway=self.gateway,
+            req=req,
+            tenant_id="default",
+            user=self.user,
+            trace_id="trace-inline-retry",
+            start_workflow=self.start_workflow,
+            goal_repo=self.goal_repo,
+        )
+
+        self.assertEqual("tool_task", result["route"])
+        self.assertEqual("direct_answer", result["response_type"])
+        self.assertIsNotNone(result["task"])
+        self.assertEqual("FAILED_RETRYABLE", result["task"]["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

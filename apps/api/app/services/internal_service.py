@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import HTTPException
@@ -32,6 +33,83 @@ from .policy_memory_service import (
     record_shadow_policy_outcome,
     record_shadow_portfolio_outcome,
 )
+
+_APPROVAL_ID_RE = re.compile(r"approval id[:\s]+([a-f0-9-]{8,})", re.IGNORECASE)
+
+
+def _extract_message_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, dict):
+        if not value:
+            return None
+        for key in ("message", "summary", "preview", "result", "output", "content", "text"):
+            candidate = _extract_message_text(value.get(key))
+            if candidate:
+                return candidate
+        if len(value) == 1:
+            return _extract_message_text(next(iter(value.values())))
+        summary = str(summarize_payload(mask_payload(value), max_len=220).get("summary") or "").strip()
+        return summary or None
+    if isinstance(value, list):
+        if not value:
+            return None
+        for item in value:
+            candidate = _extract_message_text(item)
+            if candidate:
+                return candidate
+    return None
+
+
+def _assistant_message_for_status(
+    *,
+    status_text: str,
+    payload: dict[str, Any],
+    runtime_state: dict[str, Any],
+) -> str | None:
+    if status_text == "SUCCEEDED":
+        return (
+            _extract_message_text(runtime_state.get("final_output"))
+            or _extract_message_text(payload.get("output"))
+            or _extract_message_text(payload)
+        )
+    if status_text in {"FAILED_FINAL", "FAILED_RETRYABLE", "TIMED_OUT"}:
+        return (
+            _extract_message_text(payload.get("error"))
+            or _extract_message_text(payload.get("reason_code"))
+            or _extract_message_text(payload)
+            or "Workflow execution failed."
+        )
+    return None
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in str(text or ""))
+
+
+def _localized_assistant_message(
+    *,
+    status_text: str,
+    assistant_message: str | None,
+    user_message: str,
+) -> str | None:
+    message = str(assistant_message or "").strip()
+    if not message:
+        return None
+    if status_text != "SUCCEEDED":
+        return message
+    if not _contains_cjk(user_message) or _contains_cjk(message):
+        return message
+
+    lowered = message.lower()
+    approval_match = _APPROVAL_ID_RE.search(message)
+    approval_id = approval_match.group(1) if approval_match else ""
+    if "email_ticketing workflow" in lowered or "ticket_email task" in lowered:
+        if approval_id:
+            return f"这一步已经执行完成，邮件工单流程和工具调用都已成功完成。审批单号：{approval_id}。"
+        return "这一步已经执行完成，邮件工单流程和工具调用都已成功完成。"
+    return f"这一步已经执行完成。结果摘要：{message}"
 
 
 def _validate_worker_binding(binding: dict[str, Any], worker_id: str) -> None:
@@ -316,8 +394,13 @@ def update_internal_task_status(
                 runtime_patch["task_state"] = task_state
             if status_text == "SUCCEEDED":
                 runtime_patch["final_output"] = dict(agent_runtime.get("final_output") or existing_runtime.get("final_output") or {})
-                if payload.get("output"):
-                    runtime_patch["final_output"]["message"] = str(payload.get("output"))
+                success_message = _assistant_message_for_status(
+                    status_text=status_text,
+                    payload=payload,
+                    runtime_state=runtime_patch,
+                )
+                if success_message:
+                    runtime_patch["final_output"]["message"] = success_message
             merged_runtime = merge_runtime_state(existing_runtime, runtime_patch)
             goal_row = None
             if goal_repo and str(task.get("goal_id") or ""):
@@ -364,12 +447,17 @@ def update_internal_task_status(
             if turn_repo and str(task.get("assistant_turn_id") or ""):
                 turn = turn_repo.get_turn(tenant_id=tenant_id, turn_id=str(task.get("assistant_turn_id") or ""))
                 if turn:
-                    assistant_message: str | None = None
+                    assistant_message = _assistant_message_for_status(
+                        status_text=status_text,
+                        payload=payload,
+                        runtime_state=merged_runtime,
+                    )
+                    assistant_message = _localized_assistant_message(
+                        status_text=status_text,
+                        assistant_message=assistant_message,
+                        user_message=str(turn.get("user_message") or (task.get("input_masked") or {}).get("message") or ""),
+                    )
                     response_type = str(turn.get("response_type") or "task_created")
-                    if status_text == "SUCCEEDED":
-                        assistant_message = str((merged_runtime.get("final_output") or {}).get("message") or payload.get("output") or "")
-                    elif status_text in {"FAILED_FINAL", "FAILED_RETRYABLE", "TIMED_OUT"}:
-                        assistant_message = str(payload.get("error") or payload.get("reason_code") or "Workflow execution failed.")
                     turn_repo.update_turn(
                         tenant_id=tenant_id,
                         turn_id=str(task.get("assistant_turn_id") or ""),
@@ -381,6 +469,20 @@ def update_internal_task_status(
                         task_id=str(task_id),
                         runtime_state=merged_runtime,
                     )
+                    if assistant_message and conversation_repo and str(task.get("conversation_id") or ""):
+                        try:
+                            conversation_repo.upsert_message_for_turn(
+                                tenant_id=tenant_id,
+                                user_id=str(task.get("created_by") or ""),
+                                conversation_id=str(task.get("conversation_id") or ""),
+                                turn_id=str(task.get("assistant_turn_id") or ""),
+                                role="assistant",
+                                message=assistant_message,
+                                route=str(turn.get("route") or "workflow_task"),
+                                created_at=str(task.get("updated_at") or ""),
+                            )
+                        except Exception:
+                            pass
             if conversation_repo and str(task.get("conversation_id") or ""):
                 conversation_repo.update_memory(
                     tenant_id=tenant_id,

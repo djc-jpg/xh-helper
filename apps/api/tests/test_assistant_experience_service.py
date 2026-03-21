@@ -58,6 +58,22 @@ class AssistantExperienceServiceTests(unittest.TestCase):
         self.assertEqual("帮我继续处理", summary["title"])
         self.assertEqual("这条对话里有任务正在等待人工确认。", summary["preview"])
 
+    def test_succeeded_task_card_prefers_nested_output_text_over_dict_repr(self) -> None:
+        card = build_task_card(
+            {
+                "id": "task-3",
+                "task_type": "ticket_email",
+                "status": "SUCCEEDED",
+                "output_masked": {
+                    "output": "The email ticketing workflow task completed successfully."
+                },
+                "trace_id": "trace-3",
+            }
+        )
+
+        self.assertEqual("The email ticketing workflow task completed successfully.", card["result_preview"])
+        self.assertEqual("The email ticketing workflow task completed successfully.", card["assistant_summary"])
+
 
 if __name__ == "__main__":
     unittest.main()

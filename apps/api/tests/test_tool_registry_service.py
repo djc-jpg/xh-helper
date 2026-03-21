@@ -58,6 +58,26 @@ class ToolRegistryServiceTests(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertEqual("web_search", candidates[0]["tool_name"])
 
+    def test_chinese_ticket_request_prefers_email_ticketing(self) -> None:
+        tools = self.service.list_tools(tenant_id="default")
+        candidates = self.service.select_candidates(
+            message="\u8bf7\u5e2e\u6211\u7ed9\u503c\u73ed\u56e2\u961f\u53d1\u5de5\u5355",
+            tools=tools,
+            limit=2,
+        )
+        self.assertTrue(candidates)
+        self.assertEqual("email_ticketing", candidates[0]["tool_name"])
+
+    def test_chinese_search_request_prefers_web_search(self) -> None:
+        tools = self.service.list_tools(tenant_id="default")
+        candidates = self.service.select_candidates(
+            message="\u8bf7\u5e2e\u6211\u641c\u7d22 workflow \u6587\u6863",
+            tools=tools,
+            limit=2,
+        )
+        self.assertTrue(candidates)
+        self.assertEqual("web_search", candidates[0]["tool_name"])
+
 
 if __name__ == "__main__":
     unittest.main()

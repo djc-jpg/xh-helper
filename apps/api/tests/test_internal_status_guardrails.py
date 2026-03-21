@@ -375,6 +375,138 @@ class InternalStatusGuardrailTests(unittest.TestCase):
         self.assertEqual("task_completion", resume_goals.call_args.kwargs["event_kind"])
         self.assertEqual("task-1", resume_goals.call_args.kwargs["event_key"])
 
+    def test_succeeded_status_updates_turn_message_from_structured_payload_and_conversation_history(self) -> None:
+        with (
+            patch.object(
+                task_repo,
+                "get_run_binding_any_tenant",
+                return_value={
+                    "id": "run-1",
+                    "task_id": "task-1",
+                    "tenant_id": "default",
+                    "status": "REVIEWING",
+                    "assigned_worker": settings.default_worker_id,
+                },
+            ),
+            patch.object(task_repo, "has_status_event", return_value=False),
+            patch.object(task_repo, "append_step", return_value=True),
+            patch.object(task_repo, "mark_task_succeeded"),
+            patch.object(task_repo, "update_run_status"),
+            patch.object(
+                task_repo,
+                "get_task_by_id",
+                return_value={
+                    "id": "task-1",
+                    "created_by": "user-1",
+                    "conversation_id": "conv-1",
+                    "assistant_turn_id": "turn-1",
+                    "goal_id": None,
+                    "updated_at": "2026-03-20T12:00:00Z",
+                    "runtime_state": {"task_state": {}},
+                },
+            ),
+            patch.object(task_repo, "update_task_runtime_state"),
+            patch.object(turn_repo, "get_turn", return_value={"turn_id": "turn-1", "route": "workflow_task", "response_type": "task_created", "assistant_message": "等待确认"}),
+            patch.object(turn_repo, "update_turn") as update_turn,
+            patch.object(conversation_repo, "upsert_message_for_turn", return_value=[] ) as upsert_message_for_turn,
+            patch.object(conversation_repo, "update_memory", return_value=None),
+            patch.object(task_repo, "list_tool_calls_for_task", return_value=[]),
+            patch.object(episode_repo, "upsert_episode", return_value=None),
+        ):
+            resp = self.client.post(
+                "/internal/tasks/task-1/status",
+                headers=self.headers,
+                json={
+                    "tenant_id": "default",
+                    "run_id": "run-1",
+                    "status": "SUCCEEDED",
+                    "trace_id": "trace-1",
+                    "payload": {
+                        "result": {
+                            "summary": "已成功创建并发送值班工单。"
+                        }
+                    },
+                    "status_event_id": "evt-structured-success-1",
+                },
+            )
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual("已成功创建并发送值班工单。", update_turn.call_args.kwargs["assistant_message"])
+        upsert_message_for_turn.assert_called_once()
+        self.assertEqual("已成功创建并发送值班工单。", upsert_message_for_turn.call_args.kwargs["message"])
+
+    def test_succeeded_status_localizes_known_english_completion_for_chinese_request(self) -> None:
+        with (
+            patch.object(
+                task_repo,
+                "get_run_binding_any_tenant",
+                return_value={
+                    "id": "run-1",
+                    "task_id": "task-1",
+                    "tenant_id": "default",
+                    "status": "REVIEWING",
+                    "assigned_worker": settings.default_worker_id,
+                },
+            ),
+            patch.object(task_repo, "has_status_event", return_value=False),
+            patch.object(task_repo, "append_step", return_value=True),
+            patch.object(task_repo, "mark_task_succeeded"),
+            patch.object(task_repo, "update_run_status"),
+            patch.object(
+                task_repo,
+                "get_task_by_id",
+                return_value={
+                    "id": "task-1",
+                    "created_by": "user-1",
+                    "conversation_id": "conv-1",
+                    "assistant_turn_id": "turn-1",
+                    "goal_id": None,
+                    "updated_at": "2026-03-21T09:00:00Z",
+                    "input_masked": {"message": "帮我给值班团队发工单"},
+                    "runtime_state": {"task_state": {}},
+                },
+            ),
+            patch.object(task_repo, "update_task_runtime_state"),
+            patch.object(
+                turn_repo,
+                "get_turn",
+                return_value={
+                    "turn_id": "turn-1",
+                    "route": "workflow_task",
+                    "response_type": "task_created",
+                    "assistant_message": "等待确认",
+                    "user_message": "帮我给值班团队发工单",
+                },
+            ),
+            patch.object(turn_repo, "update_turn") as update_turn,
+            patch.object(conversation_repo, "upsert_message_for_turn", return_value=[]) as upsert_message_for_turn,
+            patch.object(conversation_repo, "update_memory", return_value=None),
+            patch.object(task_repo, "list_tool_calls_for_task", return_value=[]),
+            patch.object(episode_repo, "upsert_episode", return_value=None),
+        ):
+            resp = self.client.post(
+                "/internal/tasks/task-1/status",
+                headers=self.headers,
+                json={
+                    "tenant_id": "default",
+                    "run_id": "run-1",
+                    "status": "SUCCEEDED",
+                    "trace_id": "trace-1",
+                    "payload": {
+                        "output": "The email_ticketing workflow has been successfully initiated and approved. Approval ID: 4a005800-c027-4df1-a3c3-8c637a40b699."
+                    },
+                    "status_event_id": "evt-localized-success-1",
+                },
+            )
+        self.assertEqual(200, resp.status_code)
+        self.assertEqual(
+            "这一步已经执行完成，邮件工单流程和工具调用都已成功完成。审批单号：4a005800-c027-4df1-a3c3-8c637a40b699。",
+            update_turn.call_args.kwargs["assistant_message"],
+        )
+        self.assertEqual(
+            "这一步已经执行完成，邮件工单流程和工具调用都已成功完成。审批单号：4a005800-c027-4df1-a3c3-8c637a40b699。",
+            upsert_message_for_turn.call_args.kwargs["message"],
+        )
+
     def test_cancelled_preempted_goal_is_translated_into_waiting_runtime(self) -> None:
         with (
             patch.object(

@@ -1404,6 +1404,76 @@ class AssistantConversationRepository:
             )
             return history
 
+    def upsert_message_for_turn(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+        turn_id: str,
+        role: str,
+        message: str,
+        route: str,
+        created_at: str,
+    ) -> list[dict[str, Any]]:
+        with transaction_cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id, message_history
+                FROM assistant_conversations
+                WHERE tenant_id = %s
+                  AND conversation_id = %s
+                FOR UPDATE
+                """,
+                (tenant_id, conversation_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise LookupError("conversation not found")
+            if str(row["user_id"]) != str(user_id):
+                raise PermissionError("conversation ownership mismatch")
+
+            history = list(row.get("message_history") or [])
+            masked_metadata = mask_payload({"turn_id": turn_id})
+            updated = False
+            for item in reversed(history):
+                if str(item.get("role") or "") != role:
+                    continue
+                metadata = item.get("metadata")
+                if not isinstance(metadata, dict):
+                    continue
+                if str(metadata.get("turn_id") or "") != turn_id:
+                    continue
+                item["message"] = message
+                item["route"] = route
+                item["metadata"] = {**metadata, **masked_metadata}
+                item["updated_at"] = created_at
+                updated = True
+                break
+
+            if not updated:
+                history.append(
+                    {
+                        "role": role,
+                        "message": message,
+                        "route": route,
+                        "created_at": created_at,
+                        "metadata": masked_metadata,
+                    }
+                )
+
+            cur.execute(
+                """
+                UPDATE assistant_conversations
+                SET message_history = %s,
+                    updated_at = NOW()
+                WHERE tenant_id = %s
+                  AND conversation_id = %s
+                """,
+                (Jsonb(history), tenant_id, conversation_id),
+            )
+            return history
+
     def update_title(
         self,
         *,

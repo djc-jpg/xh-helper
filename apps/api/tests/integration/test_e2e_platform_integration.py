@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import json
 import time
@@ -12,6 +13,12 @@ import pytest
 from psycopg.rows import dict_row
 
 pytestmark = pytest.mark.integration
+
+
+def _decode_token_sub(token: str) -> str:
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return str(json.loads(base64.urlsafe_b64decode(payload.encode()).decode())["sub"])
 
 
 def _latest_approval_id(detail: dict[str, Any]) -> str:
@@ -69,6 +76,72 @@ def _poll_outbox_status_history(pg_conn, approval_id: str, timeout_sec: int = 90
         time.sleep(1)
     row = _fetch_outbox_row(pg_conn, approval_id)
     raise AssertionError(f"outbox not sent approval_id={approval_id} seen={seen} row={row}")
+
+
+def _get_assistant_trace(
+    *,
+    http_client: httpx.Client,
+    base_url: str,
+    headers: dict[str, str],
+    task_id: str,
+) -> dict[str, Any]:
+    resp = http_client.get(f"{base_url}/assistant/tasks/{task_id}/trace", headers=headers)
+    if resp.status_code != 200:
+        raise AssertionError(
+            f"assistant trace failed task_id={task_id} status={resp.status_code} body={resp.text[:300]}"
+        )
+    return resp.json()
+
+
+def _wait_for_assistant_task_status(
+    *,
+    http_client: httpx.Client,
+    base_url: str,
+    headers: dict[str, str],
+    task_id: str,
+    status_text: str,
+    timeout_sec: int = 180,
+) -> dict[str, Any]:
+    deadline = time.time() + timeout_sec
+    last_trace: dict[str, Any] | None = None
+    while time.time() < deadline:
+        trace = _get_assistant_trace(http_client=http_client, base_url=base_url, headers=headers, task_id=task_id)
+        last_trace = trace
+        if str((trace.get("task") or {}).get("status") or "") == status_text:
+            return trace
+        time.sleep(1)
+    raise AssertionError(
+        f"assistant task timeout task_id={task_id} expected={status_text} last={json.dumps(last_trace or {}, ensure_ascii=True)[:700]}"
+    )
+
+
+def test_it_00_assistant_chinese_high_risk_request_requires_confirmation(
+    http_client: httpx.Client,
+    base_url: str,
+    tokens: dict[str, str],
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    user_headers = auth_headers("user")
+    user_id = _decode_token_sub(tokens["user"])
+
+    first = http_client.post(
+        f"{base_url}/assistant/chat",
+        headers=user_headers,
+        json={
+            "user_id": user_id,
+            "message": "\u8bf7\u5e2e\u6211\u7ed9\u503c\u73ed\u56e2\u961f\u53d1\u5de5\u5355",
+            "mode": "auto",
+            "metadata": {},
+        },
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+
+    assert first_body["need_confirmation"] is True, first_body
+    assert first_body["task"] is None, first_body
+    assert first_body["route"] == "tool_task", first_body
+    assert str((first_body.get("planner") or {}).get("selected_tool") or "") == "email_ticketing", first_body
+    assert "高风险" in str(first_body.get("message") or ""), first_body
 
 
 def test_it_01_happy_path_succeeds_and_artifact_exists(
@@ -285,3 +358,94 @@ def test_it_06_rerun_concurrency_conflict_and_run_no_unique(
         assert 409 in code_counts, {"codes": code_counts, "results": results[:8], "run_nos": run_nos}
     else:
         assert 500 not in code_counts, {"codes": code_counts, "results": results[:8], "run_nos": run_nos}
+
+
+def test_it_07_assistant_approval_completion_updates_conversation_view(
+    http_client: httpx.Client,
+    base_url: str,
+    tokens: dict[str, str],
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    user_headers = auth_headers("user")
+    operator_headers = auth_headers("operator")
+    user_id = _decode_token_sub(tokens["user"])
+
+    first = http_client.post(
+        f"{base_url}/assistant/chat",
+        headers=user_headers,
+        json={
+            "user_id": user_id,
+            "message": "send ticket to oncall team",
+            "mode": "auto",
+            "metadata": {},
+        },
+    )
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert first_body["need_confirmation"] is True, first_body
+    assert first_body["task"] is None, first_body
+
+    conversation_id = str(first_body["conversation_id"])
+    confirmed = http_client.post(
+        f"{base_url}/assistant/chat",
+        headers=user_headers,
+        json={
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "message": "send ticket to oncall team",
+            "mode": "auto",
+            "metadata": {"confirmed": True},
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    confirmed_body = confirmed.json()
+    task_id = str((confirmed_body.get("task") or {}).get("task_id") or "")
+    assert task_id, confirmed_body
+
+    approval_id = None
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        approvals_resp = http_client.get(f"{base_url}/approvals?status=WAITING_HUMAN", headers=operator_headers)
+        assert approvals_resp.status_code == 200, approvals_resp.text
+        approvals = approvals_resp.json()
+        approval = next((item for item in approvals if str(item.get("task_id") or "") == task_id), None)
+        if approval:
+            approval_id = str(approval["id"])
+            break
+        time.sleep(1)
+    assert approval_id, {"task_id": task_id, "conversation_id": conversation_id}
+
+    approve = http_client.post(
+        f"{base_url}/approvals/{approval_id}/approve",
+        headers=operator_headers,
+        json={"reason": "integration assistant approval closure"},
+    )
+    assert approve.status_code == 200, approve.text
+
+    trace = _wait_for_assistant_task_status(
+        http_client=http_client,
+        base_url=base_url,
+        headers=user_headers,
+        task_id=task_id,
+        status_text="SUCCEEDED",
+        timeout_sec=240,
+    )
+    conversation = http_client.get(
+        f"{base_url}/assistant/conversations/{conversation_id}",
+        headers=user_headers,
+    )
+    assert conversation.status_code == 200, conversation.text
+    conversation_body = conversation.json()
+
+    workflow_turn = next((turn for turn in conversation_body.get("turn_history") or [] if str(turn.get("task_id") or "") == task_id), None)
+    assert workflow_turn is not None, conversation_body
+    assistant_message = str(workflow_turn.get("assistant_message") or "")
+    display_summary = str(workflow_turn.get("display_summary") or "")
+    preview = str(conversation_body.get("preview") or "")
+
+    assert assistant_message, workflow_turn
+    assert display_summary, workflow_turn
+    assert "等待" not in assistant_message, workflow_turn
+    assert "{'output':" not in display_summary, workflow_turn
+    assert "等待人工确认" not in preview, conversation_body
+    assert str(trace.get("assistant_summary") or "").strip(), trace
